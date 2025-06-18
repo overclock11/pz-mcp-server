@@ -1,0 +1,43 @@
+name = "pz-mcp-server"
+main = "dist/cloudflare-worker.js"
+compatibility_date = "2024-06-19"
+compatibility_flags = ["nodejs_compat"]
+
+[env.development]
+name = "pz-mcp-server-dev"
+
+[env.production]
+name = "pz-mcp-server-prod"
+
+# D1 Database configuration
+[[env.development.d1_databases]]
+binding = "DB"
+database_name = "pz-mcp-dev"
+database_id = "your-dev-database-id"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "pz-mcp-prod"  
+database_id = "your-prod-database-id"
+
+# KV storage for caching
+[[env.development.kv_namespaces]]
+binding = "CACHE"
+id = "your-dev-kv-id"
+
+[[env.production.kv_namespaces]]
+binding = "CACHE"
+id = "your-prod-kv-id"
+
+# Environment variables
+[env.development.vars]
+ENVIRONMENT = "development"
+LOG_LEVEL = "debug"
+
+[env.production.vars]
+ENVIRONMENT = "production"
+LOG_LEVEL = "info"
+
+# Increase memory limit for parsing operations
+[limits]
+cpu_ms = 50000
