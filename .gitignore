@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Generated database
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Generated mods output
+generated-mods/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/

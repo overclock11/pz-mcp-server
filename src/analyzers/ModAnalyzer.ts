@@ -179,11 +179,17 @@ export class ModAnalyzer {
       return structure;
     }
 
-    // Check for mod.info
-    const modInfoPaths = [
-      join(modPath, 'mod.info'),
-      join(modPath, '42', 'mod.info'),
-    ];
+    // Check for mod.info (root or versioned dirs: 42, 42.0, ...)
+    const modInfoPaths = [join(modPath, 'mod.info')];
+    try {
+      for (const entry of readdirSync(modPath)) {
+        if (/^\d+(\.\d+)*$/.test(entry)) {
+          modInfoPaths.push(join(modPath, entry, 'mod.info'));
+        }
+      }
+    } catch {
+      // ignore unreadable dirs
+    }
 
     for (const modInfoPath of modInfoPaths) {
       if (existsSync(modInfoPath)) {
@@ -254,10 +260,16 @@ export class ModAnalyzer {
   }
 
   private parseModInfo(modPath: string): ModInfo | undefined {
-    const modInfoPaths = [
-      join(modPath, 'mod.info'),
-      join(modPath, '42', 'mod.info'),
-    ];
+    const modInfoPaths = [join(modPath, 'mod.info')];
+    try {
+      for (const entry of readdirSync(modPath)) {
+        if (/^\d+(\.\d+)*$/.test(entry)) {
+          modInfoPaths.push(join(modPath, entry, 'mod.info'));
+        }
+      }
+    } catch {
+      // ignore unreadable dirs
+    }
 
     for (const modInfoPath of modInfoPaths) {
       if (existsSync(modInfoPath)) {

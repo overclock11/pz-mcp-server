@@ -26,28 +26,50 @@ export class ScriptGenerator {
   }
 
   private initializeTemplates(): void {
-    // Weapon templates
+    // Weapon templates (Build 42 format)
     this.templates.set('melee_weapon', {
       type: 'item',
       category: 'Weapon',
       baseStats: {
         DisplayCategory: 'Weapon',
-        Type: 'Weapon',
-        Weight: 1.0,
+        ItemType: 'base:weapon',
+        Weight: 2.0,
         BaseSpeed: 1.0,
-        MaxDamage: 1.0,
-        MinDamage: 0.8,
+        MaxDamage: 8.0,
+        MinDamage: 8.0,
+        MaxRange: 1.4,
+        MinRange: 0.61,
         ConditionMax: 10,
-        ConditionLowerChanceOneIn: 20,
-        Categories: 'SmallBlade',
+        ConditionLowerChanceOneIn: 15,
+        CritDmgMultiplier: 6.0,
+        CriticalChance: 35.0,
         DamageCategory: 'Slash',
-        SwingTime: 3,
+        SubCategory: 'Swinging',
+        SwingAnim: 'Bat',
+        Swingtime: 3.0,
+        MinimumSwingTime: 3.0,
+        SwingAmountBeforeImpact: 0.02,
         KnockBackOnNoDeath: true,
-        TreeDamage: 0,
-        DoorDamage: 5,
+        KnockdownMod: 0.0,
+        PushBackMod: 0.5,
+        HitAngleMod: -30.0,
+        MaxHitcount: 3,
+        TreeDamage: 1,
+        TwoHandWeapon: true,
+        WeaponLength: 0.4,
+        Sharpness: 1.0,
+        RunAnim: 'Run_Weapon2',
+        DamageMakeHole: false,
+        SplatBloodOnNoDeath: false,
+        SplatNumber: 2,
+        HeadCondition: 13,
+        HeadConditionLowerChanceMultiplier: 1.5,
+        Tags: 'base:sharpenable;base:repairwithtape;base:repairwithglue;base:hasmetal',
+        Categories: 'base:longblade',
+        DoorDamage: 8,
       },
-      requiredProperties: ['DisplayName', 'Icon', 'Type', 'Weight'],
-      optionalProperties: ['AttachmentType', 'WeaponSprite', 'SwingSound', 'HitSound', 'BreakSound'],
+      requiredProperties: ['DisplayName', 'Icon'],
+      optionalProperties: ['IconsForTexture', 'AttachmentType', 'WeaponSprite', 'SwingSound', 'HitSound', 'BreakSound', 'DropSound', 'ImpactSound', 'DoorHitSound', 'HitFloorSound', 'OnBreak'],
       balanceMultipliers: {
         powerful: 1.5,
         weak: 0.7,
@@ -60,7 +82,7 @@ export class ScriptGenerator {
       category: 'Weapon',
       baseStats: {
         DisplayCategory: 'Weapon',
-        Type: 'Weapon',
+        ItemType: 'base:weapon',
         Weight: 2.0,
         MaxRange: 20,
         MinRange: 0.8,
@@ -89,7 +111,7 @@ export class ScriptGenerator {
       category: 'Food',
       baseStats: {
         DisplayCategory: 'Food',
-        Type: 'Food',
+        ItemType: 'base:food',
         Weight: 0.1,
         HungerChange: -10,
         ThirstChange: 0,
@@ -115,11 +137,10 @@ export class ScriptGenerator {
       category: 'Tool',
       baseStats: {
         DisplayCategory: 'Tool',
-        Type: 'Normal',
+        ItemType: 'base:normal',
         Weight: 0.5,
         ConditionMax: 10,
         ConditionLowerChanceOneIn: 30,
-        Categories: 'Tool',
       },
       requiredProperties: ['DisplayName', 'Icon', 'Type'],
       optionalProperties: ['AttachmentType', 'Tags', 'MetalValue'],
@@ -135,7 +156,7 @@ export class ScriptGenerator {
       category: 'Clothing',
       baseStats: {
         DisplayCategory: 'Clothing',
-        Type: 'Clothing',
+        ItemType: 'base:clothing',
         Weight: 0.3,
         BodyLocation: 'Torso',
         CanBeEquipped: 'Torso',
@@ -152,18 +173,32 @@ export class ScriptGenerator {
       },
     });
 
-    // Recipe template
+    this.templates.set('model_block', {
+      type: 'model',
+      category: 'Model',
+      baseStats: {
+        scale: 1.0,
+      },
+      requiredProperties: ['mesh'],
+      optionalProperties: ['texture'],
+      balanceMultipliers: {
+        powerful: 1.0,
+        weak: 1.0,
+        vanilla: 1.0,
+      },
+    });
+
+    // Recipe template (Build 42 craftRecipe format)
     this.templates.set('basic_recipe', {
       type: 'recipe',
       category: 'Recipe',
       baseStats: {
-        Time: 50.0,
-        Category: 'Cooking',
-        OnCreate: 'Recipe.OnCreate.CannedFood',
-        OnGiveXP: 'Recipe.OnGiveXP.Cooking5',
+        time: 100.0,
+        category: 'Survival',
+        CanBeDoneFromFloor: true,
       },
       requiredProperties: ['Result'],
-      optionalProperties: ['Sound', 'Category', 'NeedToBeLearn'],
+      optionalProperties: ['timedAction', 'Tags', 'OnCreate', 'OnGiveXP'],
       balanceMultipliers: {
         powerful: 0.7, // Faster crafting
         weak: 1.5,     // Slower crafting
@@ -179,7 +214,23 @@ export class ScriptGenerator {
     module: string = 'Base',
     options: GenerationOptions = {}
   ): Promise<string> {
-    
+
+    const content = await this.generateScriptUnwrapped(type, name, specifications, options);
+
+    // Wrap in module if needed
+    return this.wrapInModule(content, module, options.includeComments);
+  }
+
+  /**
+   * Generate script content WITHOUT the module wrapper — used by ModProjectGenerator
+   * to group multiple blocks into a single module block.
+   */
+  async generateScriptUnwrapped(
+    type: string,
+    name: string,
+    specifications: Record<string, any>,
+    options: GenerationOptions = {}
+  ): Promise<string> {
     const template = this.getTemplate(type, specifications.category);
     if (!template) {
       throw new Error(`No template found for type: ${type}, category: ${specifications.category}`);
@@ -189,17 +240,7 @@ export class ScriptGenerator {
     const balanceRef = await this.getBalanceReference(type, specifications);
 
     // Generate the script content
-    const content = await this.generateScriptContent(
-      type,
-      name,
-      specifications,
-      template,
-      balanceRef,
-      options
-    );
-
-    // Wrap in module if needed
-    return this.wrapInModule(content, module, options.includeComments);
+    return this.generateScriptContent(type, name, specifications, template, balanceRef, options);
   }
 
   private getTemplate(type: string, category?: string): ItemTemplate | null {
@@ -221,8 +262,18 @@ export class ScriptGenerator {
       'basic_recipe',
     ];
 
+    // Try category-specific templates first (e.g. Weapon -> melee_weapon)
+    if (category) {
+      for (const templateKey of typeTemplates) {
+        if (templateKey.includes(category.toLowerCase())) {
+          return this.templates.get(templateKey)!;
+        }
+      }
+    }
+
+    // Try type-specific templates (skip generic 'item', handled by fallback below)
     for (const templateKey of typeTemplates) {
-      if (templateKey.includes(type) || (category && templateKey.includes(category.toLowerCase()))) {
+      if (type !== 'item' && templateKey.includes(type)) {
         return this.templates.get(templateKey)!;
       }
     }
@@ -233,6 +284,8 @@ export class ScriptGenerator {
         return this.templates.get('tool_item')!;
       case 'recipe':
         return this.templates.get('basic_recipe')!;
+      case 'model':
+        return this.templates.get('model_block')!;
       default:
         return null;
     }
@@ -300,6 +353,8 @@ export class ScriptGenerator {
       return this.generateItemScript(name, specs, template, references, options);
     } else if (type === 'recipe') {
       return this.generateRecipeScript(name, specs, template, references, options);
+    } else if (type === 'model') {
+      return this.generateModelScript(name, specs, template, references, options);
     } else if (type === 'fixing') {
       return this.generateFixingScript(name, specs, template, references, options);
     } else if (type === 'sound') {
@@ -329,6 +384,27 @@ export class ScriptGenerator {
     // Merge template stats with user specifications
     const properties = { ...template.baseStats, ...specs };
 
+    // Strip generator control keys (not real script properties)
+    delete properties.category;
+    delete properties.weaponType;
+    delete properties.similar;
+
+    // Remove template keys that differ only by casing (user override wins, e.g. MaxHitcount vs MaxHitCount)
+    for (const specKey of Object.keys(specs)) {
+      for (const tKey of Object.keys(template.baseStats)) {
+        if (tKey !== specKey && tKey.toLowerCase() === specKey.toLowerCase()) {
+          delete properties[tKey];
+        }
+      }
+    }
+
+    // Keep damage range consistent when only one bound is overridden
+    if (typeof properties.MaxDamage === 'number' && typeof properties.MinDamage === 'number') {
+      if (properties.MaxDamage < properties.MinDamage) {
+        properties.MinDamage = properties.MaxDamage;
+      }
+    }
+
     // Apply balance adjustments
     if (options.balance && options.balance !== 'custom') {
       this.applyBalanceAdjustments(properties, template, options.balance, references);
@@ -347,6 +423,53 @@ export class ScriptGenerator {
     return lines.join('\n');
   }
 
+  private generateModelScript(
+    name: string,
+    specs: Record<string, any>,
+    template: ItemTemplate,
+    references: GameItem[],
+    options: GenerationOptions
+  ): string {
+
+    const lines: string[] = [];
+
+    if (options.includeComments) {
+      lines.push(`    /* ${name} - Generated model definition (Build 42) */`);
+    }
+
+    lines.push(`    model ${name}`);
+    lines.push(`    {`);
+
+    // Scalar properties (mesh, texture, scale)
+    const properties = { ...template.baseStats, ...specs };
+    delete properties.worldOffset;
+    delete properties.worldRotate;
+
+    for (const [key, value] of Object.entries(properties)) {
+      if (value !== undefined && value !== null) {
+        lines.push(`        ${key} = ${this.formatPropertyValue(value)},`);
+      }
+    }
+
+    // World attachment for correct ground placement
+    if (specs.worldOffset || specs.worldRotate) {
+      lines.push(``);
+      lines.push(`        attachment world`);
+      lines.push(`        {`);
+      if (specs.worldOffset) {
+        lines.push(`            offset = ${specs.worldOffset},`);
+      }
+      if (specs.worldRotate) {
+        lines.push(`            rotate = ${specs.worldRotate},`);
+      }
+      lines.push(`        }`);
+    }
+
+    lines.push(`    }`);
+
+    return lines.join('\n');
+  }
+
   private generateRecipeScript(
     name: string,
     specs: Record<string, any>,
@@ -354,43 +477,20 @@ export class ScriptGenerator {
     references: GameItem[],
     options: GenerationOptions
   ): string {
-    
+
     const lines: string[] = [];
-    
+
     if (options.includeComments) {
-      lines.push(`    /* ${name} - Generated recipe */`);
+      lines.push(`    /* ${name} - Generated craftRecipe (Build 42) */`);
     }
-    
-    lines.push(`    recipe ${name}`);
+
+    lines.push(`    craftRecipe ${name}`);
     lines.push(`    {`);
-
-    // Add ingredients
-    if (specs.ingredients && Array.isArray(specs.ingredients)) {
-      for (const ingredient of specs.ingredients) {
-        if (typeof ingredient === 'string') {
-          lines.push(`        ${ingredient},`);
-        } else if (ingredient.item) {
-          const count = ingredient.count || 1;
-          if (ingredient.keep) {
-            lines.push(`        keep ${ingredient.item},`);
-          } else {
-            lines.push(`        ${ingredient.item}${count > 1 ? `=${count}` : ''},`);
-          }
-        }
-      }
-      lines.push('');
-    }
-
-    // Add result
-    if (specs.result) {
-      const resultCount = specs.resultCount || 1;
-      lines.push(`        Result:${specs.result}=${resultCount},`);
-    }
 
     // Merge template properties with user specifications
     const properties = { ...template.baseStats };
     Object.keys(specs).forEach(key => {
-      if (!['ingredients', 'result', 'resultCount'].includes(key)) {
+      if (!['ingredients', 'result', 'resultCount', 'keep'].includes(key)) {
         properties[key] = specs[key];
       }
     });
@@ -400,13 +500,38 @@ export class ScriptGenerator {
       this.applyRecipeBalanceAdjustments(properties, template, options.balance, references);
     }
 
-    // Generate properties
+    // Generate scalar properties (time, category, timedAction, etc.)
     for (const [key, value] of Object.entries(properties)) {
-      if (value !== undefined && value !== null) {
-        const formattedValue = this.formatPropertyValue(value);
-        lines.push(`        ${key}:${formattedValue},`);
+      if (value === undefined || value === null) continue;
+      const formattedValue = this.formatPropertyValue(value);
+      lines.push(`        ${key} = ${formattedValue},`);
+    }
+
+    // Inputs block (Build 42 syntax)
+    lines.push(`        inputs`);
+    lines.push(`        {`);
+    const ingredients = Array.isArray(specs.ingredients) ? specs.ingredients : [];
+    for (const ingredient of ingredients) {
+      if (typeof ingredient === 'string') {
+        const suffix = ingredient.includes('mode:') ? '' : ' mode:destroy';
+        lines.push(`            item 1 ${ingredient}${suffix},`);
+      } else if (ingredient.item) {
+        const count = ingredient.count || 1;
+        const hasMode = String(ingredient.item).includes('mode:');
+        const suffix = hasMode ? '' : (ingredient.keep ? ' mode:keep' : ' mode:destroy');
+        lines.push(`            item ${count} ${ingredient.item}${suffix},`);
       }
     }
+    lines.push(`        }`);
+
+    // Outputs block
+    lines.push(`        outputs`);
+    lines.push(`        {`);
+    if (specs.result) {
+      const resultCount = specs.resultCount || 1;
+      lines.push(`            item ${resultCount} ${specs.result},`);
+    }
+    lines.push(`        }`);
 
     lines.push(`    }`);
 
@@ -609,6 +734,16 @@ export class ScriptGenerator {
     
     lines.push(`module ${module}`);
     lines.push('{');
+
+    // Non-Base modules need to import Base to reference vanilla items
+    if (module !== 'Base') {
+      lines.push('    imports');
+      lines.push('    {');
+      lines.push('        Base,');
+      lines.push('    }');
+      lines.push('');
+    }
+
     lines.push(content);
     lines.push('}');
     
@@ -623,7 +758,7 @@ export class ScriptGenerator {
       {
         DisplayName: 'Example Item',
         DisplayCategory: 'Tool',
-        Type: 'Normal',
+        ItemType: 'base:normal',
         Weight: 0.5,
         Icon: 'Hammer',
       },

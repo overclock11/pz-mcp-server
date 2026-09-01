@@ -117,12 +117,21 @@ export class ProjectZomboidParser {
       // Determine module name from mod info or directory
       const moduleName = modInfo?.id || basename(modPath);
 
-      // Look for media/scripts directories in both versioned and common folders
-      const possiblePaths = [
+      // Look for media/scripts directories: root, common/, and versioned dirs (42, 42.0, ...)
+      const possiblePaths: string[] = [
         join(modPath, 'media', 'scripts'),           // Direct structure
-        join(modPath, '42', 'media', 'scripts'),     // Build 42 structure
-        join(modPath, 'common', 'media', 'scripts'), // Common structure
+        join(modPath, 'common', 'media', 'scripts'), // Common structure (shared assets)
       ];
+      try {
+        for (const entry of readdirSync(modPath)) {
+          // Build 42+ versioned folders: "42", "42.0", "43", "42.1", etc.
+          if (/^\d+(\.\d+)*$/.test(entry)) {
+            possiblePaths.push(join(modPath, entry, 'media', 'scripts'));
+          }
+        }
+      } catch {
+        // modPath unreadable; fall through to foundScripts check
+      }
 
       let foundScripts = false;
       for (const scriptsPath of possiblePaths) {
@@ -219,10 +228,10 @@ export class ProjectZomboidParser {
       braceLevel += openBraces - closeBraces;
 
       // Check for block start (item, recipe, etc.)
-      const blockMatch = line.match(/^(item|recipe|evolvedrecipe|fixing|sound|vehicle)\s+([^\s{]+)/);
+      const blockMatch = line.match(/^(item|recipe|evolvedrecipe|fixing|sound|vehicle|craftRecipe)\s+([^\s{]+)/);
       if (blockMatch && !currentBlock) {
         currentBlock = {
-          type: blockMatch[1],
+          type: blockMatch[1].toLowerCase(),
           name: blockMatch[2],
           module: currentModule,
         };
@@ -245,7 +254,7 @@ export class ProjectZomboidParser {
               // Update counters
               switch (item.type) {
                 case 'item': results.itemCount++; break;
-                case 'recipe': results.recipeCount++; break;
+                case 'recipe': case 'craftrecipe': results.recipeCount++; break;
                 case 'sound': results.soundCount++; break;
                 case 'vehicle': results.vehicleCount++; break;
                 case 'evolvedrecipe': results.evolvedRecipeCount++; break;
@@ -288,6 +297,8 @@ export class ProjectZomboidParser {
           this.parseItemProperty(trimmed, properties);
         } else if (blockInfo.type === 'recipe') {
           this.parseRecipeProperty(trimmed, properties);
+        } else if (blockInfo.type === 'craftrecipe') {
+          this.parseCraftRecipeProperty(trimmed, properties);
         } else if (blockInfo.type === 'fixing') {
           this.parseFixingProperty(trimmed, properties);
         } else if (blockInfo.type === 'sound') {
@@ -326,7 +337,17 @@ export class ProjectZomboidParser {
     const match = line.match(/^\s*(\w+)\s*=\s*([^,]+),?\s*$/);
     if (match) {
       const [, key, value] = match;
-      properties[key] = this.parseValue(value.trim());
+      const parsed = this.parseValue(value.trim());
+      // B42 uses repeated keys (e.g. multiple ModelWeaponPart lines) — collect as array
+      if (key in properties) {
+        if (Array.isArray(properties[key])) {
+          properties[key].push(parsed);
+        } else {
+          properties[key] = [properties[key], parsed];
+        }
+      } else {
+        properties[key] = parsed;
+      }
     }
   }
 
@@ -346,6 +367,33 @@ export class ProjectZomboidParser {
           item: item.trim(),
           count: count ? parseInt(count) : 1,
         });
+      }
+    }
+  }
+
+  private parseCraftRecipeProperty(line: string, properties: Record<string, any>): void {
+    // Build 42 craftRecipe: scalar props use "key = value," format
+    const match = line.match(/^\s*(\w+)\s*=\s*([^,]+),?\s*$/);
+    if (match) {
+      const [, key, value] = match;
+      properties[key] = this.parseValue(value.trim());
+      return;
+    }
+
+    // Input/output lines: "item <count> <spec>" (with ids, tags or mappers)
+    const itemMatch = line.match(/^\s*item\s+(\d+)\s+(.+?),?\s*$/i);
+    if (itemMatch) {
+      if (!properties.recipeItems) properties.recipeItems = [];
+      properties.recipeItems.push({
+        count: parseInt(itemMatch[1], 10),
+        spec: itemMatch[2].trim(),
+      });
+
+      // Extract concrete item ids (e.g. Base.FlaxRippled) for reference tracking
+      const ids = itemMatch[2].match(/\bBase\.\w+/g);
+      if (ids) {
+        if (!properties.recipeItemRefs) properties.recipeItemRefs = [];
+        properties.recipeItemRefs.push(...ids);
       }
     }
   }

@@ -32,46 +32,125 @@ export interface ReferenceValidationResult {
 export class ValidationEngine {
   private db: DatabaseManager;
   
-  // Define required properties for different block types
+  // Define required properties for different block types (Build 42)
   private readonly requiredProperties = {
-    item: ['Type', 'DisplayName'],
+    item: ['DisplayName'],
     recipe: ['Result'],
+    craftrecipe: [],
     fixing: ['Require', 'Fixer'],
     sound: ['category'],
     vehicle: ['template'],
     evolvedrecipe: ['BaseItem', 'ResultItem'],
   };
 
-  // Define valid property types and ranges
+  // Define valid property types and ranges (Build 42 values)
   private readonly propertyValidators = {
     // Numeric properties with ranges
     Weight: { type: 'number', min: 0, max: 1000 },
     MaxDamage: { type: 'number', min: 0, max: 100 },
     MinDamage: { type: 'number', min: 0, max: 100 },
     ConditionMax: { type: 'number', min: 1, max: 100 },
+    Swingtime: { type: 'number', min: 0.1, max: 10 },
+    MinimumSwingtime: { type: 'number', min: 0.1, max: 10 },
     SwingTime: { type: 'number', min: 0.1, max: 10 },
     Time: { type: 'number', min: 1, max: 10000 },
-    
+    CriticalChance: { type: 'number', min: 0, max: 100 },
+    CritDmgMultiplier: { type: 'number', min: 0, max: 100 },
+    Sharpness: { type: 'number', min: 0, max: 10 },
+    WeaponLength: { type: 'number', min: 0, max: 5 },
+    MaxRange: { type: 'number', min: 0, max: 100 },
+    MinRange: { type: 'number', min: 0, max: 100 },
+    DoorDamage: { type: 'number', min: 0, max: 1000 },
+    TreeDamage: { type: 'number', min: 0, max: 100 },
+    MaxHitcount: { type: 'number', min: 1, max: 10 },
+    HitAngleMod: { type: 'number', min: -360, max: 360 },
+    MinAngle: { type: 'number', min: -360, max: 360 },
+    PushBackMod: { type: 'number', min: 0, max: 10 },
+    KnockdownMod: { type: 'number', min: 0, max: 10 },
+    MetalValue: { type: 'number', min: 0, max: 100 },
+
     // Boolean properties
     CanBeEquipped: { type: 'boolean' },
     KnockBackOnNoDeath: { type: 'boolean' },
     IsCookable: { type: 'boolean' },
-    
+    TwoHandWeapon: { type: 'boolean' },
+    DamageMakeHole: { type: 'boolean' },
+    RequiresEquippedBothHands: { type: 'boolean' },
+    CanBeDoneFromFloor: { type: 'boolean' },
+
     // String properties with valid values
+    ItemType: { type: 'enum', values: ['base:normal', 'base:weapon', 'base:weaponpart', 'base:food', 'base:literature', 'base:container', 'base:clothing', 'base:alarmclock', 'base:alarmclockclothing', 'base:key', 'base:drainable', 'base:moveable', 'base:map', 'base:radio', 'base:animal'] },
     Type: { type: 'enum', values: ['Normal', 'Weapon', 'Food', 'Literature', 'Container', 'Clothing', 'AlarmClock', 'Key', 'Drainable', 'Moveable'] },
-    DisplayCategory: { type: 'enum', values: ['Weapon', 'Food', 'Medical', 'Literature', 'Tool', 'Clothing', 'Container', 'Electronics', 'Survival'] },
+    DisplayCategory: { type: 'string' }, // B42 has ~80 valid categories; validated against DB
     DamageCategory: { type: 'enum', values: ['Slash', 'Stab', 'Blunt', 'Burn', 'Bite'] },
+    SwingAnim: { type: 'string' },
+    RunAnim: { type: 'string' },
     Categories: { type: 'string' }, // Can be multiple values separated by ;
-    
-    // Item references
-    Icon: { type: 'reference', referenceType: 'sprite' },
-    WeaponSprite: { type: 'reference', referenceType: 'sprite' },
-    AttachmentType: { type: 'reference', referenceType: 'item' },
-    
+    DisplayName: { type: 'string' },
+    SubCategory: { type: 'string' },
+    Tags: { type: 'string' },
+    tags: { type: 'string' }, // craftRecipe uses lowercase
+    IconsForTexture: { type: 'string' },
+    AttachmentType: { type: 'string' },
+    BaseSpeed: { type: 'number', min: 0.1, max: 5 },
+    ConditionLowerChanceOneIn: { type: 'number', min: 1, max: 1000 },
+    OnBreak: { type: 'string' },
+    TimedAction: { type: 'string' },
+    timedAction: { type: 'string' },
+    SkillRequired: { type: 'string' },
+    xpAward: { type: 'string' },
+    HeadCondition: { type: 'number', min: 0, max: 100 },
+    HeadConditionLowerChanceMultiplier: { type: 'number', min: 0, max: 10 },
+    MaxHitCount: { type: 'number', min: 1, max: 10 },
+    MinimumSwingTime: { type: 'number', min: 0.1, max: 10 },
+    SwingAmountBeforeImpact: { type: 'number', min: 0, max: 1 },
+    SplatNumber: { type: 'number', min: 0, max: 20 },
+    SplatBloodOnNoDeath: { type: 'boolean' },
+
     // Sound references
     SwingSound: { type: 'reference', referenceType: 'sound' },
     HitSound: { type: 'reference', referenceType: 'sound' },
     BreakSound: { type: 'reference', referenceType: 'sound' },
+    DropSound: { type: 'reference', referenceType: 'sound' },
+    ImpactSound: { type: 'reference', referenceType: 'sound' },
+    ClickSound: { type: 'reference', referenceType: 'sound' },
+    DoorHitSound: { type: 'reference', referenceType: 'sound' },
+    HitFloorSound: { type: 'reference', referenceType: 'sound' },
+
+    // B42 firearm properties
+    AmmoType: { type: 'string' },
+    AmmoBox: { type: 'string' },
+    MagazineType: { type: 'string' },
+    MaxAmmo: { type: 'number', min: 1, max: 500 },
+    FireMode: { type: 'string' },
+    FireModePossibilities: { type: 'string' },
+    JamGunChance: { type: 'number', min: 0, max: 100 },
+    CyclicRateMultiplier: { type: 'number', min: 0, max: 10 },
+    RecoilDelay: { type: 'number', min: 0, max: 100 },
+    SoundRadius: { type: 'number', min: 0, max: 1000 },
+    SoundVolume: { type: 'number', min: 0, max: 100 },
+    HitChance: { type: 'number', min: 0, max: 100 },
+    Aimingtime: { type: 'number', min: 0, max: 100 },
+    AimingTime: { type: 'number', min: 0, max: 100 },
+    Reloadtime: { type: 'number', min: 0, max: 100 },
+    ReloadTime: { type: 'number', min: 0, max: 100 },
+    AimingPerkCritModifier: { type: 'number', min: -100, max: 100 },
+    AimingPerkHitChanceModifier: { type: 'number', min: -100, max: 100 },
+    AimingPerkMinAngleModifier: { type: 'number', min: -10, max: 10 },
+    AimingPerkRangeModifier: { type: 'number', min: -100, max: 100 },
+    ModelWeaponPart: { type: 'string' },
+    WorldStaticModel: { type: 'string' },
+
+    // B42 weapon part properties
+    MountOn: { type: 'string' },
+    PartType: { type: 'string' },
+    WeightModifier: { type: 'number', min: -10, max: 10 },
+    HitChanceModifier: { type: 'number', min: -100, max: 100 },
+    RecoilDelayModifier: { type: 'number', min: -100, max: 100 },
+    AimingTimeModifier: { type: 'number', min: -100, max: 100 },
+    CanAttach: { type: 'string' },
+    CanDetach: { type: 'string' },
+    Tooltip: { type: 'string' },
   };
 
   constructor(db: DatabaseManager) {
@@ -202,10 +281,10 @@ export class ValidationEngine {
       braceLevel += openBraces - closeBraces;
 
       // Check for block start
-      const blockMatch = line.match(/^(item|recipe|evolvedrecipe|fixing|sound|vehicle)\s+([^\s{]+)/);
+      const blockMatch = line.match(/^(item|recipe|evolvedrecipe|fixing|sound|vehicle|craftRecipe)\s+([^\s{]+)/);
       if (blockMatch && !currentBlock) {
         currentBlock = {
-          type: blockMatch[1],
+          type: blockMatch[1].toLowerCase(),
           name: blockMatch[2],
           properties: {},
           startLine: lineNumber,
@@ -241,7 +320,7 @@ export class ValidationEngine {
     // Different block types use different syntax
     let match: RegExpMatchArray | null = null;
 
-    if (blockType === 'item' || blockType === 'sound' || blockType === 'vehicle') {
+    if (blockType === 'item' || blockType === 'sound' || blockType === 'vehicle' || blockType === 'craftrecipe') {
       // Use "property = value," format
       match = line.match(/^\s*(\w+)\s*=\s*([^,]+),?\s*$/);
     } else if (blockType === 'recipe' || blockType === 'evolvedrecipe') {
@@ -300,7 +379,7 @@ export class ValidationEngine {
     strict: boolean
   ): Promise<void> {
     
-    // Check required properties
+    // Check required properties (Build 42: ItemType or legacy Type for items)
     const required = this.requiredProperties[block.type as keyof typeof this.requiredProperties];
     if (required) {
       for (const prop of required) {
@@ -314,6 +393,16 @@ export class ValidationEngine {
           });
         }
       }
+    }
+
+    if (block.type === 'item' && !block.properties.ItemType && !block.properties.Type) {
+      result.errors.push({
+        line: block.startLine,
+        message: 'Missing required property: ItemType',
+        severity: 'error',
+        code: 'MISSING_PROPERTY',
+        suggestion: 'Build 42 requires "ItemType = base:weapon," (or base:food, base:normal, etc.)',
+      });
     }
 
     // Validate individual properties
@@ -432,6 +521,9 @@ export class ValidationEngine {
       case 'recipe':
         await this.validateRecipeBlock(block, result);
         break;
+      case 'craftrecipe':
+        this.validateCraftRecipeBlock(block, result);
+        break;
       case 'fixing':
         this.validateFixingBlock(block, result);
         break;
@@ -442,8 +534,12 @@ export class ValidationEngine {
   }
 
   private validateItemBlock(block: any, result: ValidationResult): void {
-    // Weapon-specific validations
-    if (block.properties.Type === 'Weapon') {
+    // Build 42 weapon detection (ItemType) with legacy Type fallback
+    const isWeapon = block.properties.ItemType === 'base:weapon' || block.properties.Type === 'Weapon';
+    // Build 42 food detection
+    const isFood = block.properties.ItemType === 'base:food' || block.properties.Type === 'Food';
+
+    if (isWeapon) {
       if (!block.properties.MaxDamage && !block.properties.MinDamage) {
         result.warnings.push({
           line: block.startLine,
@@ -456,15 +552,14 @@ export class ValidationEngine {
       if (!block.properties.Categories) {
         result.warnings.push({
           line: block.startLine,
-          message: 'Weapon items should specify Categories (e.g., SmallBlade, LongBlade, Blunt)',
+          message: 'Weapon items should specify Categories (e.g., base:longblade, base:smallblade, base:blunt)',
           severity: 'warning',
           code: 'MISSING_WEAPON_CATEGORY',
         });
       }
     }
 
-    // Food-specific validations
-    if (block.properties.Type === 'Food') {
+    if (isFood) {
       if (!block.properties.HungerChange && !block.properties.Calories) {
         result.warnings.push({
           line: block.startLine,
@@ -475,13 +570,51 @@ export class ValidationEngine {
       }
     }
 
-    // Balance warnings
+    // Balance warnings (Build 42 damage scale: vanilla weapons go up to ~8+)
     if (block.properties.Weight && block.properties.Weight > 50) {
       result.warnings.push({
         line: block.startLine,
         message: `Item weight ${block.properties.Weight} seems very high for normal gameplay`,
         severity: 'warning',
         code: 'BALANCE_WARNING',
+      });
+    }
+  }
+
+  private validateCraftRecipeBlock(block: any, result: ValidationResult): void {
+    if (!block.properties.time) {
+      result.warnings.push({
+        line: block.startLine,
+        message: 'craftRecipe should specify crafting "time" (in game seconds)',
+        severity: 'warning',
+        code: 'MISSING_RECIPE_TIME',
+      });
+    }
+
+    if (!block.properties.category) {
+      result.warnings.push({
+        line: block.startLine,
+        message: 'craftRecipe should specify a "category" (e.g., Farming, Survival, Cooking)',
+        severity: 'warning',
+        code: 'MISSING_RECIPE_CATEGORY',
+      });
+    }
+
+    if (!block.rawContent.includes('inputs')) {
+      result.warnings.push({
+        line: block.startLine,
+        message: 'craftRecipe should define an "inputs" block',
+        severity: 'warning',
+        code: 'MISSING_RECIPE_INPUTS',
+      });
+    }
+
+    if (!block.rawContent.includes('outputs')) {
+      result.warnings.push({
+        line: block.startLine,
+        message: 'craftRecipe should define an "outputs" block',
+        severity: 'warning',
+        code: 'MISSING_RECIPE_OUTPUTS',
       });
     }
   }
@@ -598,7 +731,9 @@ export class ValidationEngine {
   ): void {
     
     for (const block of blocks) {
-      if (block.type !== expectedType) {
+      // Build 42: 'recipe' expectedType matches craftrecipe blocks
+      const normalizedExpected = expectedType === 'recipe' ? ['recipe', 'craftrecipe'] : [expectedType];
+      if (!normalizedExpected.includes(block.type)) {
         result.warnings.push({
           line: block.startLine,
           message: `Expected ${expectedType} block but found ${block.type}`,

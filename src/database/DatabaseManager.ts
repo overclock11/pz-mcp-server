@@ -6,7 +6,7 @@ export interface GameItem {
   id: string;
   name: string;
   displayName?: string;
-  type: 'item' | 'recipe' | 'sound' | 'vehicle' | 'evolvedrecipe' | 'fixing';
+  type: 'item' | 'recipe' | 'craftrecipe' | 'sound' | 'vehicle' | 'evolvedrecipe' | 'fixing';
   module: string;
   category?: string;
   properties: Record<string, any>;
@@ -100,7 +100,7 @@ export class DatabaseManager {
 
     // References table for tracking item dependencies
     this.db.exec(`
-      CREATE TABLE IF NOT EXISTS references (
+      CREATE TABLE IF NOT EXISTS "references" (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         item_id TEXT NOT NULL,
         reference_id TEXT NOT NULL,
@@ -128,9 +128,9 @@ export class DatabaseManager {
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_items_type ON items (type)`);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_items_module ON items (module)`);
     this.db.exec(`CREATE INDEX IF NOT EXISTS idx_items_category ON items (category)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_references_item ON references (item_id)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_references_ref ON references (reference_id)`);
-    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_references_type ON references (reference_type)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_references_item ON "references" (item_id)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_references_ref ON "references" (reference_id)`);
+    this.db.exec(`CREATE INDEX IF NOT EXISTS idx_references_type ON "references" (reference_type)`);
   }
 
   async insertItem(item: GameItem): Promise<void> {
@@ -205,13 +205,13 @@ export class DatabaseManager {
 
     // Add type filter
     if (options.type && options.type !== 'all') {
-      sql += ' AND type = ?';
+      sql += ' AND items.type = ?';
       params.push(options.type);
     }
 
     // Add category filter
     if (options.category) {
-      sql += ' AND category = ?';
+      sql += ' AND items.category = ?';
       params.push(options.category);
     }
 
@@ -319,7 +319,7 @@ export class DatabaseManager {
 
   async addReference(itemId: string, referenceId: string, referenceType: string, context?: string): Promise<void> {
     this.db.prepare(`
-      INSERT OR IGNORE INTO references (item_id, reference_id, reference_type, context)
+      INSERT OR IGNORE INTO "references" (item_id, reference_id, reference_type, context)
       VALUES (?, ?, ?, ?)
     `).run(itemId, referenceId, referenceType, context);
   }
@@ -327,7 +327,7 @@ export class DatabaseManager {
   async getReferences(itemId: string): Promise<Array<{referenceId: string; type: string; context?: string}>> {
     const rows = this.db.prepare(`
       SELECT reference_id, reference_type, context
-      FROM references
+      FROM "references"
       WHERE item_id = ?
     `).all(itemId);
 
@@ -339,12 +339,28 @@ export class DatabaseManager {
   }
 
   async checkReference(referenceId: string, referenceType?: string): Promise<boolean> {
-    let sql = 'SELECT COUNT(*) as count FROM items WHERE id = ?';
-    const params = [referenceId];
+    // Try the exact id, id without module prefix, and with Base. prefix
+    const candidateSet = new Set<string>([referenceId]);
+    if (referenceId.includes('.')) {
+      candidateSet.add(referenceId.split('.').pop()!);
+    } else {
+      candidateSet.add(`Base.${referenceId}`);
+    }
+    const candidates = Array.from(candidateSet);
 
-    if (referenceType && referenceType !== 'all') {
-      sql += ' AND type = ?';
-      params.push(referenceType);
+    let sql: string;
+    const params: any[] = [...candidates];
+
+    if (referenceType === 'sprite') {
+      // Sprites are not stored as items; match against item ids/names instead
+      sql = `SELECT COUNT(*) as count FROM items WHERE id IN (${candidates.map(() => '?').join(',')}) OR name IN (${candidates.map(() => '?').join(',')})`;
+      params.push(...candidates);
+    } else {
+      sql = `SELECT COUNT(*) as count FROM items WHERE id IN (${candidates.map(() => '?').join(',')})`;
+      if (referenceType && referenceType !== 'all') {
+        sql += ' AND type = ?';
+        params.push(referenceType);
+      }
     }
 
     const row = this.db.prepare(sql).get(...params);
@@ -379,7 +395,7 @@ export class DatabaseManager {
 
   async clearDatabase(): Promise<void> {
     this.db.exec('DELETE FROM items');
-    this.db.exec('DELETE FROM references');
+    this.db.exec('DELETE FROM "references"');
     this.db.exec('DELETE FROM mods');
   }
 
