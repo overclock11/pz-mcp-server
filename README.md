@@ -38,6 +38,22 @@ A comprehensive Model Context Protocol (MCP) server for Project Zomboid mod deve
 
 ### Prerequisites
 - Node.js 18.0.0 or higher
+
+### 🧠 Skill for opencode (recommended)
+
+This repo ships an **opencode skill** that teaches any opencode session the complete Build 42 modding workflow with this MCP: how to ask the right questions, calibrate stats against vanilla B42, generate the mod, validate it, install it into `Zomboid\mods\`, customize textures/icons/poster, and always finish with the in-game test commands.
+
+**Install it (one copy):**
+
+```powershell
+# Windows
+Copy-Item -Recurse skill\pz-b42-modding-skill "$env:USERPROFILE\.config\opencode\skill\pz-b42-modding-skill"
+
+# Linux / macOS
+cp -r skill/pz-b42-modding-skill ~/.config/opencode/skill/pz-b42-modding-skill
+```
+
+Then restart opencode. From now on, just describe the weapon/item you want (e.g. *"quiero un cuchillo táctico militar que se encuentre en el mundo"*) and the session will follow the full guided workflow automatically.
 - npm or yarn package manager
 
 ### Local Development

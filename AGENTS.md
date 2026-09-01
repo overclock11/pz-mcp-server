@@ -43,4 +43,4 @@ MCP server para desarrollo de mods de Project Zomboid **Build 42**. Genera mods 
 ## Estado conocido
 
 - Mod de ejemplo del usuario: `C:\Users\Jlian\Documents\Codigo\generated-mods\` (Stormbreaker, LeonsKnife) e instalados en `C:\Users\Jlian\Zomboid\mods\`.
-- Skill global con el flujo completo: `~/.config/opencode/skill/pz-b42-modding/SKILL.md`.
+- Skill: única fuente de verdad es la copia del repo `skill/pz-b42-modding-skill/SKILL.md`. opencode la carga vía `skills.paths` en `~/.config/opencode/opencode.jsonc` apuntando a `<repo>\skill`. NO existe copia en `~/.config/opencode/skill/` — no crearla. El README.md indica cómo la instala un usuario nuevo (copiar a su `~/.config/opencode/skill/`).
