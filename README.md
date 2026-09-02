@@ -21,6 +21,14 @@ A comprehensive Model Context Protocol (MCP) server for Project Zomboid mod deve
 - **Balance analysis** comparing custom items to vanilla equivalents
 - **Reference validation** ensuring all dependencies exist
 - **Multiple output formats** (items, recipes, fixing scripts, sounds, vehicles)
+- **Build 42 syntax** throughout: `ItemType = base:<type>`, namespaced `Categories`/`Tags`, modern `craftRecipe`
+
+### One-Shot Mod Generation (`generate_mod`)
+- **Complete mod folder** ready to copy into `Zomboid\mods\` or upload to the Workshop
+- **Versioned structure** (`42.0/` + root `mod.info`) with B42-correct `craftRecipe` (bracketed inputs, mandatory bench tag, drainable-friendly modes)
+- **Vanilla asset reuse**: item `WeaponSprite` pointing at a vanilla mesh is auto-cloned into a mod-owned `model` block (hand/world attachments preserved) with the vanilla texture copied as a paintable base — never clobbered on regeneration
+- **Procedural art**: `icon.png` (256x256), `poster.png` (512x288) and per-item inventory icons (128x128) generated with a dependency-free PNG encoder, replaceable by your own art
+- **World loot, translations (multi-language) and a step-by-step `GUIA.md`** included in every generated mod
 
 ### Advanced Validation Engine
 - **Real-time syntax validation** with detailed error reporting
@@ -112,6 +120,20 @@ The server can be integrated with any IDE that supports MCP protocol:
 2. Configure the server endpoint
 3. Start using Project Zomboid development tools
 
+### Direct stdio testing (no MCP client needed)
+
+The server speaks line-delimited JSON-RPC over stdio, so you can drive it from a shell:
+
+```powershell
+@'
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"cli","version":"1.0.0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized"}
+{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"search_vanilla","arguments":{"query":"katana"}}}
+'@ | node dist\index.js
+```
+
+Sequence: `initialize` → `notifications/initialized` → `tools/call`. The SQLite database (`data/pz_database.db`) resolves relative to the process working directory — run from the repo root.
+
 ## 🛠️ MCP Tools
 
 ### `search_vanilla`
@@ -142,18 +164,19 @@ Generate balanced Project Zomboid scripts using templates and game data.
 - `properties` (object): Properties and specifications
 - `module` (string, optional): Module name (default: "Base")
 
-**Example:**
+**Example (Build 42 syntax):**
 ```typescript
 // Generate a custom weapon
 await mcp.callTool('generate_script', {
   type: 'item',
   name: 'SuperKatana',
   properties: {
+    category: 'Weapon',            // control key: picks the weapon template
     DisplayName: 'Super Katana',
-    Type: 'Weapon',
+    ItemType: 'base:weapon',
     MaxDamage: 5.0,
     Weight: 2.0,
-    Categories: 'LongBlade'
+    Categories: 'base:longblade'
   }
 });
 ```
@@ -226,6 +249,52 @@ await mcp.callTool('parse_game_files', {
 });
 ```
 
+### `generate_mod`
+Generate a complete Build 42 mod folder ready to copy into `Zomboid\mods\`: mod.info, item scripts, 3D model blocks, craftRecipes, world loot, translations, placeholder icons and a step-by-step `GUIA.md`.
+
+**Parameters:**
+- `modId` (string): Alphanumeric mod id used in scripts/folders (e.g. `SpecialAxe`)
+- `modName` (string): Display name (ASCII only — accents belong in translations)
+- `description`, `author`, `version`, `gameVersion` (optional): mod.info metadata
+- `outputPath` (string, optional): Defaults to `./generated-mods/<modId>`
+- `overwrite` (boolean, optional): Allow writing into an existing folder (never deletes foreign files, e.g. user-painted textures)
+- `items` (array): `{ name, properties }` — use `category: 'Weapon'` for the weapon template; generator control keys (`category`, `weaponType`, `similar`) are never emitted to the script
+- `models` (array, optional): `{ name, mesh, texture?, scale?, worldOffset?, worldRotate? }` — meshes can be vanilla paths (e.g. `weapons/2handed/FireAxe`); the vanilla texture is always copied as a paintable base
+- `recipes` (array, optional): B42 `craftRecipe` specs — `time`, `category`, `SkillRequired: "Perk:Level"`, `timedAction`, `xpAward`, `ingredients` (`{ item, count, keep?, mode? }`), `result`
+- `worldLoot` (array, optional): `{ distribution, weight }` — adds the first item to procedural distributions
+- `languages` / `translations` (optional): generates `ItemName.json` per language
+
+**Example:**
+```typescript
+await mcp.callTool('generate_mod', {
+  modId: 'Stormbreaker',
+  modName: "Stormbreaker - Thor's Axe",
+  items: [{
+    name: 'Stormbreaker',
+    properties: {
+      category: 'Weapon', weaponType: 'Axe',
+      DisplayName: 'Stormbreaker', Icon: 'Stormbreaker',
+      Categories: 'base:axe', WeaponSprite: 'FireAxe',
+      MinDamage: 2.5, MaxDamage: 4.5, TwoHandWeapon: true
+    }
+  }],
+  recipes: [{
+    name: 'ForgeStormbreaker', time: 400, category: 'Metalworking',
+    SkillRequired: 'MetalWelding:6', timedAction: 'Welding', xpAward: 'MetalWelding:75',
+    ingredients: [
+      { item: 'Base.MetalBar', count: 4 },
+      { item: 'tags[base:weldingmask]', keep: true },
+      { item: 'Base.BlowTorch', count: 1, mode: 'none' }
+    ],
+    result: 'Stormbreaker.Stormbreaker'
+  }],
+  worldLoot: [{ distribution: 'MeleeWeapons', weight: 0.5 }],
+  languages: ['EN', 'ES'],
+  translations: { ES: { 'Stormbreaker.Stormbreaker': 'Rompetormentas' } },
+  overwrite: true
+});
+```
+
 ## 🏗️ Architecture
 
 ```
@@ -294,24 +363,19 @@ database_id = "your-database-id"
    await mcp.callTool('parse_game_files', {});
    ```
 
-3. **Start Development**:
+3. **Generate a complete mod in one shot**:
    ```typescript
-   // Search for existing items
-   const results = await mcp.callTool('search_vanilla', {
-     query: 'weapon damage > 3'
-   });
+   const result = await mcp.callTool('generate_mod', { /* see generate_mod docs */ });
+   // -> result.content includes modId, itemIds and ready-to-paste test commands:
+   //    additem "PlayerName" "<ModId>.<Item>" 1
+   //    getPlayer():getInventory():AddItem("<ModId>.<Item>")
+   ```
 
-   // Generate new item
-   const script = await mcp.callTool('generate_script', {
-     type: 'item',
-     name: 'MyWeapon',
-     properties: { /* ... */ }
-   });
+4. **Customize (optional)**: replace the procedural icons/poster, paint the copied vanilla texture base, add custom sounds — every generated mod ships with a Spanish step-by-step `GUIA.md` covering all of it.
 
-   // Validate before use
-   const validation = await mcp.callTool('validate_script', {
-     content: script
-   });
+5. **Validate anytime**:
+   ```typescript
+   const validation = await mcp.callTool('validate_script', { content: script, strict: true });
    ```
 
 ### Supported File Formats
@@ -337,12 +401,13 @@ const weaponScript = await mcp.callTool('generate_script', {
   type: 'item',
   name: 'EliteKatana',
   properties: {
+    category: 'Weapon',            // control key: weapon template
     DisplayName: 'Elite Katana',
-    Type: 'Weapon',
+    ItemType: 'base:weapon',
     Weight: 2.5,
     MaxDamage: 4.5,
     MinDamage: 3.5,
-    Categories: 'LongBlade',
+    Categories: 'base:longblade',
     Icon: 'Katana',
     SwingSound: 'KatanaSwing'
   }
