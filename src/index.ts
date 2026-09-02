@@ -16,26 +16,18 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { pathToFileURL } from "url";
-import { DatabaseManager } from "./database/DatabaseManager.js";
-import { ProjectZomboidParser } from "./parsers/ProjectZomboidParser.js";
-import { ModAnalyzer } from "./analyzers/ModAnalyzer.js";
-import { ScriptGenerator } from "./generators/ScriptGenerator.js";
-import { ValidationEngine } from "./validation/ValidationEngine.js";
-import { PathManager } from "./utils/PathManager.js";
-import { ModProjectGenerator } from "./generators/ModProjectGenerator.js";
+import { DatabaseManager } from "./database/index.js";
+import { ProjectZomboidParser } from "./parsers/index.js";
+import { ModAnalyzer } from "./analyzers/index.js";
+import { ModProjectGenerator, ModModelSpec, ScriptGenerator } from "./generators/index.js";
+import { ValidationEngine } from "./validation/index.js";
+import { PathManager } from "./shared/index.js";
 import { join } from "path";
 
-const server = new Server(
-  {
-    name: "pz-mcp-server",
-    version: "1.0.0",
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
-);
+const server = new Server({
+  name: "pz-mcp-server",
+  version: "1.0.0",
+});
 
 // Initialize core components
 let dbManager: DatabaseManager;
@@ -192,7 +184,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     switch (name) {
       case "search_vanilla": {
         const { query, type, category, limit } = SearchVanillaSchema.parse(args);
-        const results = await dbManager.searchContent(query, { type, category, limit });
+        const results = await dbManager.searchContent(query, {
+          ...(type ? { type } : {}),
+          ...(category ? { category } : {}),
+          limit,
+        });
         
         return {
           content: [
@@ -290,7 +286,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "generate_mod": {
         const modArgs = GenerateModSchema.parse(args);
         const targetPath = modArgs.outputPath || join(process.cwd(), "generated-mods", modArgs.modId);
-        const result = await modGenerator.generateMod({ ...modArgs, outputPath: targetPath });
+        const result = await modGenerator.generateMod({
+          modId: modArgs.modId,
+          modName: modArgs.modName,
+          ...(modArgs.description !== undefined ? { description: modArgs.description } : {}),
+          ...(modArgs.author !== undefined ? { author: modArgs.author } : {}),
+          version: modArgs.version,
+          gameVersion: modArgs.gameVersion,
+          outputPath: targetPath,
+          overwrite: modArgs.overwrite,
+          items: modArgs.items,
+          ...(modArgs.models !== undefined
+            ? { models: modArgs.models as ModModelSpec[] }
+            : {}),
+          ...(modArgs.recipes !== undefined ? { recipes: modArgs.recipes } : {}),
+          ...(modArgs.worldLoot !== undefined ? { worldLoot: modArgs.worldLoot } : {}),
+          languages: modArgs.languages,
+          ...(modArgs.translations !== undefined ? { translations: modArgs.translations } : {}),
+        });
 
         return {
           content: [
@@ -333,7 +346,7 @@ function formatSearchResults(results: any[]): string {
     
     if (result.properties) {
       const props = Object.entries(result.properties)
-        .filter(([key, value]) => value !== null && value !== undefined)
+        .filter(([, value]) => value !== null && value !== undefined)
         .slice(0, 5) // Limit to first 5 properties
         .map(([key, value]) => `${key}: ${value}`)
         .join(', ');

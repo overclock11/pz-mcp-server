@@ -26,7 +26,7 @@ MCP server para desarrollo de mods de Project Zomboid **Build 42**. Genera mods 
 ## Generación de mods (ModProjectGenerator)
 
 - Estructura: raíz `mod.info` + carpeta versionada `42.0/` (+ `common/` y otras versiones soportadas por el parser vía regex `^\d+(\.\d+)*$`).
-- Iconos generados proceduralmente con `src/utils/PngGenerator.ts` (encoder PNG puro, sin deps): icon 256x256, poster 512x288, `Item_<Icon>.png` 128x128 con silueta axe/blade según `Categories`.
+- Iconos generados proceduralmente con `src/generators/services/PngGenerator.ts` (encoder PNG puro, sin deps): icon 256x256, poster 512x288, `Item_<Icon>.png` 128x128 con silueta axe/blade según `Categories`.
 - `GUIA.md` dinámica por mod: pasos (probar en 2 min, iconos, retexture, sonidos, loot, stats con tabla vs vanilla, errores comunes, checklist). Numeración de pasos con contador `nextStep` (cuidado con TDZ si se agregan secciones).
 - Result incluye `modId` e `itemIds` → la respuesta del tool imprime comandos `additem` y Lua `AddItem` con IDs reales. **Siempre cerrar ayuda de mods con el comando de prueba (preferencia del usuario).**
 - `worldLoot` → `media/lua/server/Items/Distributions_<ModId>.lua` (patrón `table.insert(ProceduralDistributions...)`, probado en el mod Tactical Axe del workshop).

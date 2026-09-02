@@ -1,27 +1,10 @@
 import Database from 'better-sqlite3';
 import { join } from 'path';
 import { mkdirSync } from 'fs';
-
-export interface GameItem {
-  id: string;
-  name: string;
-  displayName?: string;
-  type: 'item' | 'recipe' | 'craftrecipe' | 'sound' | 'vehicle' | 'evolvedrecipe' | 'fixing';
-  module: string;
-  category?: string;
-  properties: Record<string, any>;
-  rawContent: string;
-  filePath: string;
-}
-
-export interface SearchOptions {
-  type?: string;
-  category?: string;
-  limit?: number;
-}
+import type { GameItem, ItemRow, SearchOptions } from '../models/types.js';
 
 export class DatabaseManager {
-  private db: Database.Database;
+  private db!: Database.Database;
   private dbPath: string;
 
   constructor(dbPath?: string) {
@@ -227,19 +210,23 @@ export class DatabaseManager {
       params.push(options.limit);
     }
 
-    const rows = this.db.prepare(sql).all(...params);
-    
-    return rows.map(row => ({
+    const rows = this.db.prepare(sql).all(...params) as ItemRow[];
+
+    return rows.map(row => this.mapRowToItem(row));
+  }
+
+  private mapRowToItem(row: ItemRow): GameItem {
+    return {
       id: row.id,
       name: row.name,
-      displayName: row.display_name,
-      type: row.type as any,
+      ...(row.display_name !== null ? { displayName: row.display_name } : {}),
+      type: row.type as GameItem['type'],
+      ...(row.category !== null ? { category: row.category } : {}),
       module: row.module,
-      category: row.category,
       properties: JSON.parse(row.properties || '{}'),
-      rawContent: row.raw_content,
-      filePath: row.file_path,
-    }));
+      rawContent: row.raw_content ?? '',
+      filePath: row.file_path ?? '',
+    };
   }
 
   async getItemById(id: string): Promise<GameItem | null> {
@@ -247,21 +234,11 @@ export class DatabaseManager {
       SELECT id, name, display_name, type, module, category, properties, raw_content, file_path
       FROM items
       WHERE id = ?
-    `).get(id);
+    `).get(id) as ItemRow | undefined;
 
     if (!row) return null;
 
-    return {
-      id: row.id,
-      name: row.name,
-      displayName: row.display_name,
-      type: row.type as any,
-      module: row.module,
-      category: row.category,
-      properties: JSON.parse(row.properties || '{}'),
-      rawContent: row.raw_content,
-      filePath: row.file_path,
-    };
+    return this.mapRowToItem(row);
   }
 
   async getItemsByType(type: string): Promise<GameItem[]> {
@@ -270,19 +247,9 @@ export class DatabaseManager {
       FROM items
       WHERE type = ?
       ORDER BY name ASC
-    `).all(type);
+    `).all(type) as ItemRow[];
 
-    return rows.map(row => ({
-      id: row.id,
-      name: row.name,
-      displayName: row.display_name,
-      type: row.type as any,
-      module: row.module,
-      category: row.category,
-      properties: JSON.parse(row.properties || '{}'),
-      rawContent: row.raw_content,
-      filePath: row.file_path,
-    }));
+    return rows.map(row => this.mapRowToItem(row));
   }
 
   async getCategories(): Promise<string[]> {
@@ -291,9 +258,9 @@ export class DatabaseManager {
       FROM items
       WHERE category IS NOT NULL
       ORDER BY category ASC
-    `).all();
+    `).all() as Array<{ category: string | null }>;
 
-    return rows.map(row => row.category);
+    return rows.map(row => row.category ?? '');
   }
 
   async getStats(): Promise<Record<string, number>> {
@@ -304,15 +271,15 @@ export class DatabaseManager {
       SELECT type, COUNT(*) as count
       FROM items
       GROUP BY type
-    `).all();
+    `).all() as Array<{ type: string; count: number }>;
 
     for (const row of typeRows) {
       stats[row.type] = row.count;
     }
 
     // Total count
-    const totalRow = this.db.prepare('SELECT COUNT(*) as count FROM items').get();
-    stats.total = totalRow.count;
+    const totalRow = this.db.prepare('SELECT COUNT(*) as count FROM items').get() as { count: number } | undefined;
+    stats.total = totalRow?.count ?? 0;
 
     return stats;
   }
@@ -329,12 +296,12 @@ export class DatabaseManager {
       SELECT reference_id, reference_type, context
       FROM "references"
       WHERE item_id = ?
-    `).all(itemId);
+    `).all(itemId) as Array<{ reference_id: string; reference_type: string; context: string | null }>;
 
     return rows.map(row => ({
       referenceId: row.reference_id,
       type: row.reference_type,
-      context: row.context,
+      ...(row.context !== null ? { context: row.context } : {}),
     }));
   }
 
@@ -363,8 +330,8 @@ export class DatabaseManager {
       }
     }
 
-    const row = this.db.prepare(sql).get(...params);
-    return row.count > 0;
+    const row = this.db.prepare(sql).get(...params) as { count: number } | undefined;
+    return (row?.count ?? 0) > 0;
   }
 
   async getSimilarItems(query: string, limit: number = 5): Promise<string[]> {
@@ -388,7 +355,7 @@ export class DatabaseManager {
       `${query}%`,
       `${query}%`,
       limit
-    );
+    ) as Array<{ name: string }>;
 
     return rows.map(row => row.name);
   }

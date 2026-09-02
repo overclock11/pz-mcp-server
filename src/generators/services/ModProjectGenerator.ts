@@ -1,81 +1,15 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { ScriptGenerator } from './ScriptGenerator.js';
-import { DatabaseManager } from '../database/DatabaseManager.js';
-import { PathManager } from '../utils/PathManager.js';
-import { Canvas, drawWeapon, shapeFromCategories } from '../utils/PngGenerator.js';
-
-export interface ModItemSpec {
-  name: string;
-  properties?: Record<string, any>;
-}
-
-export interface ModModelSpec {
-  name: string;
-  mesh: string;
-  texture?: string;
-  scale?: number;
-  worldOffset?: string;
-  worldRotate?: string;
-}
-
-export interface ModRecipeSpec {
-  name: string;
-  [key: string]: any;
-}
-
-export interface LootEntry {
-  distribution: string;
-  weight: number;
-}
-
-interface ModelPlan {
-  name: string;
-  mesh?: string | undefined;
-  texture?: string | undefined;
-  scale?: number | undefined;
-  worldOffset?: string | undefined;
-  worldRotate?: string | undefined;
-  vanillaSprite?: string | undefined;
-}
-
-interface ModelInfo {
-  name: string;
-  mesh: string;
-  scale?: number | undefined;
-  texture: string | null;
-}
-
-export interface GenerateModOptions {
-  modId: string;
-  modName: string;
-  description?: string;
-  author?: string;
-  version?: string;
-  gameVersion?: string;
-  outputPath: string;
-  overwrite?: boolean;
-  gamePath?: string;
-  items: ModItemSpec[];
-  models?: ModModelSpec[];
-  recipes?: ModRecipeSpec[];
-  worldLoot?: LootEntry[];
-  languages?: string[];
-  translations?: Record<string, Record<string, string>>;
-}
-
-export interface GeneratedModResult {
-  outputPath: string;
-  files: string[];
-  modId: string;
-  itemIds: string[];
-}
-
-// 1x1 transparent PNG placeholder (fallback only)
-const PLACEHOLDER_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-  'base64'
-);
+import type { DatabaseManager } from '../../database/index.js';
+import { PathManager } from '../../shared/index.js';
+import { Canvas, drawWeapon, shapeFromCategories } from './PngGenerator.js';
+import type {
+  GenerateModOptions,
+  GeneratedModResult,
+  ModelInfo,
+  ModelPlan,
+} from '../models/types.js';
 
 function renderWeaponArt(shape: 'axe' | 'blade', width: number, height: number, withBackground: boolean): Buffer {
   const canvas = new Canvas(width, height);

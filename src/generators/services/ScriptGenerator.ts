@@ -1,20 +1,5 @@
-import { DatabaseManager, GameItem } from '../database/DatabaseManager.js';
-
-export interface ItemTemplate {
-  type: string;
-  category: string;
-  baseStats: Record<string, any>;
-  requiredProperties: string[];
-  optionalProperties: string[];
-  balanceMultipliers: Record<string, number>;
-}
-
-export interface GenerationOptions {
-  module?: string;
-  balance?: 'vanilla' | 'powerful' | 'weak' | 'custom';
-  includeComments?: boolean;
-  useTemplate?: string;
-}
+import type { DatabaseManager, GameItem } from '../../database/index.js';
+import type { GenerationOptions, ItemTemplate } from '../models/types.js';
 
 export class ScriptGenerator {
   private db: DatabaseManager;
@@ -353,13 +338,13 @@ export class ScriptGenerator {
     if (type === 'item') {
       return this.generateItemScript(name, specs, template, references, options);
     } else if (type === 'recipe') {
-      return this.generateRecipeScript(name, specs, template, references, options);
+      return this.generateRecipeScript(name, specs, template, options);
     } else if (type === 'model') {
-      return this.generateModelScript(name, specs, template, references, options);
+      return this.generateModelScript(name, specs, template, options);
     } else if (type === 'fixing') {
-      return this.generateFixingScript(name, specs, template, references, options);
+      return this.generateFixingScript(name, specs, options);
     } else if (type === 'sound') {
-      return this.generateSoundScript(name, specs, template, references, options);
+      return this.generateSoundScript(name, specs, options);
     }
 
     throw new Error(`Script generation for type '${type}' not implemented`);
@@ -428,7 +413,6 @@ export class ScriptGenerator {
     name: string,
     specs: Record<string, any>,
     template: ItemTemplate,
-    references: GameItem[],
     options: GenerationOptions
   ): string {
 
@@ -475,7 +459,6 @@ export class ScriptGenerator {
     name: string,
     specs: Record<string, any>,
     template: ItemTemplate,
-    references: GameItem[],
     options: GenerationOptions
   ): string {
 
@@ -509,7 +492,7 @@ export class ScriptGenerator {
 
     // Apply balance adjustments
     if (options.balance && options.balance !== 'custom') {
-      this.applyRecipeBalanceAdjustments(properties, template, options.balance, references);
+      this.applyRecipeBalanceAdjustments(properties, template, options.balance);
     }
 
     // Generate scalar properties (time, category, timedAction, etc.)
@@ -561,8 +544,6 @@ export class ScriptGenerator {
   private generateFixingScript(
     name: string,
     specs: Record<string, any>,
-    template: ItemTemplate,
-    references: GameItem[],
     options: GenerationOptions
   ): string {
     
@@ -601,8 +582,6 @@ export class ScriptGenerator {
   private generateSoundScript(
     name: string,
     specs: Record<string, any>,
-    template: ItemTemplate,
-    references: GameItem[],
     options: GenerationOptions
   ): string {
     
@@ -679,8 +658,7 @@ export class ScriptGenerator {
   private applyRecipeBalanceAdjustments(
     properties: Record<string, any>,
     template: ItemTemplate,
-    balance: string,
-    references: GameItem[]
+    balance: string
   ): void {
     
     const multiplier = template.balanceMultipliers[balance] || 1.0;

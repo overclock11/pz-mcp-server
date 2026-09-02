@@ -117,10 +117,11 @@ export class PathManager {
     // Check Steam installations
     const steamPath = await this.detectSteamInstallation();
     if (steamPath) {
+      const steamVersion = this.getGameVersion(steamPath);
       installations.push({
         path: steamPath,
         platform: 'steam',
-        version: this.getGameVersion(steamPath),
+        ...(steamVersion !== undefined ? { version: steamVersion } : {}),
         isValid: true,
       });
     }
@@ -129,10 +130,11 @@ export class PathManager {
     for (const path of this.commonPaths) {
       if (this.isValidProjectZomboidInstallation(path)) {
         const platform = this.detectPlatform(path);
+        const version = this.getGameVersion(path);
         installations.push({
           path,
           platform,
-          version: this.getGameVersion(path),
+          ...(version !== undefined ? { version } : {}),
           isValid: true,
         });
       }
