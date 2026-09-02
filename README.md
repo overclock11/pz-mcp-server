@@ -37,10 +37,9 @@ A comprehensive Model Context Protocol (MCP) server for Project Zomboid mod deve
 - **Best practices suggestions** for mod development
 
 ### Deployment Ready
-- **Cloudflare Workers** support for serverless deployment
-- **D1 Database** integration for persistent storage
-- **HTTP API** for integration with any MCP client
-- **Claude Desktop** ready with example configurations
+- **opencode ready** with a bundled modding skill and example configurations
+- **Stdio JSON-RPC** transport for integration with any MCP client
+- **SQLite** local database with full-text search — zero external services
 
 ## 🔧 Installation
 
@@ -67,7 +66,7 @@ Then restart opencode. From now on, just describe the weapon/item you want (e.g.
 ### Local Development
 ```bash
 # Clone the repository
-git clone https://github.com/minimax/pz-mcp-server.git
+git clone https://github.com/overclock11/pz-mcp-server.git
 cd pz-mcp-server
 
 # Install dependencies
@@ -80,37 +79,25 @@ npm run build
 npm run dev
 ```
 
-### Cloudflare Workers Deployment
-```bash
-# Install Wrangler CLI
-npm install -g wrangler
-
-# Login to Cloudflare
-wrangler login
-
-# Create D1 database
-wrangler d1 create pz-mcp-prod
-
-# Deploy to Cloudflare Workers
-wrangler deploy
-```
-
 ## 📖 Usage
 
-### With Claude Desktop
+### With opencode
 
-Add to your `claude_desktop_config.json`:
+Add the server to your `~/.config/opencode/opencode.jsonc`:
 
-```json
+```jsonc
 {
-  "mcpServers": {
+  "mcp": {
     "pz-mcp-server": {
-      "command": "node",
-      "args": ["/path/to/pz-mcp-server/dist/index.js"]
+      "type": "local",
+      "command": ["node", "C:/path/to/pz-mcp-server/dist/index.js"],
+      "enabled": true
     }
   }
 }
 ```
+
+Restart opencode and the tools (`generate_mod`, `search_vanilla`, `validate_script`...) become available in every session. For the full guided modding workflow, also install the bundled skill (see Installation above).
 
 ### With Cursor/VSCode
 
@@ -303,7 +290,7 @@ await mcp.callTool('generate_mod', {
 ├─────────────────────────────────────────────────────┤
 │  Path Manager  │  Enhanced Parser  │  Script Gen    │
 ├─────────────────────────────────────────────────────┤
-│          SQLite/D1 Database Layer                   │
+│              SQLite Database Layer                  │
 ├─────────────────────────────────────────────────────┤
 │  Game Data     │  Templates       │  Validation     │
 │  (Vanilla PZ)  │  (JSON-based)   │  (Real-time)    │
@@ -312,41 +299,13 @@ await mcp.callTool('generate_mod', {
 
 ### Core Components
 
-- **DatabaseManager**: SQLite/D1 database with full-text search capabilities
+- **DatabaseManager**: SQLite database with full-text search capabilities
 - **ProjectZomboidParser**: Parse vanilla game files and mod directories
 - **ScriptGenerator**: Generate balanced scripts using templates and game data
+- **ModProjectGenerator**: One-shot complete mod generation (scripts, models, recipes, loot, translations, icons, GUIA)
 - **ValidationEngine**: Real-time syntax and reference validation
 - **ModAnalyzer**: Comprehensive mod analysis and quality metrics
 - **PathManager**: Auto-detection of Project Zomboid installations
-
-## 🌐 Cloudflare Workers Deployment
-
-The server includes full Cloudflare Workers support for serverless deployment:
-
-### Features
-- **D1 Database** for persistent storage
-- **KV Storage** for caching frequently accessed data
-- **HTTP API** endpoints for all MCP tools
-- **Automatic scaling** with zero cold starts
-- **Global edge deployment** for low latency
-
-### API Endpoints
-
-- `GET /health` - Health check
-- `GET /mcp/info` - Server capabilities
-- `POST /tools/{toolName}` - Execute MCP tools
-- `POST /admin/load-game-data` - Load vanilla game data
-
-### Configuration
-
-Update `wrangler.toml` with your database IDs:
-
-```toml
-[[env.production.d1_databases]]
-binding = "DB"
-database_name = "pz-mcp-prod"
-database_id = "your-database-id"
-```
 
 ## 📋 Development Workflow
 

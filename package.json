@@ -1,5 +1,5 @@
 {
-  "name": "@minimax/pz-mcp-server",
+  "name": "pz-mcp-server",
   "version": "1.0.0",
   "description": "MCP Server for Project Zomboid mod development",
   "type": "module",
@@ -19,23 +19,21 @@
     "parser",
     "sqlite"
   ],
-  "author": "MiniMax Agent",
+  "author": "overclock11",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.4.0",
-    "commander": "^11.1.0",
-    "zod": "^3.22.4",
     "better-sqlite3": "^12.2.0",
-    "hono": "^3.12.0"
+    "zod": "^3.22.4"
   },
   "devDependencies": {
-    "@types/node": "^20.10.5",
     "@types/better-sqlite3": "^7.6.8",
+    "@types/jest": "^29.5.11",
+    "@types/node": "^20.10.5",
     "@typescript-eslint/eslint-plugin": "^6.15.0",
     "@typescript-eslint/parser": "^6.15.0",
     "eslint": "^8.56.0",
     "jest": "^29.7.0",
-    "@types/jest": "^29.5.11",
     "prettier": "^3.1.1",
     "tsx": "^4.6.2",
     "typescript": "^5.3.3"
@@ -45,10 +43,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/minimax/pz-mcp-server.git"
+    "url": "https://github.com/overclock11/pz-mcp-server.git"
   },
   "bugs": {
-    "url": "https://github.com/minimax/pz-mcp-server/issues"
+    "url": "https://github.com/overclock11/pz-mcp-server/issues"
   },
-  "homepage": "https://github.com/minimax/pz-mcp-server#readme"
+  "homepage": "https://github.com/overclock11/pz-mcp-server#readme"
 }

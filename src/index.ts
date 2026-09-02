@@ -3,7 +3,7 @@
 /**
  * Project Zomboid MCP Server
  * A comprehensive MCP server for Project Zomboid mod development
- * Author: MiniMax Agent
+ * https://github.com/overclock11/pz-mcp-server
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
