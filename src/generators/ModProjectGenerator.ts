@@ -1,7 +1,8 @@
-import { existsSync, mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { ScriptGenerator } from './ScriptGenerator.js';
 import { DatabaseManager } from '../database/DatabaseManager.js';
+import { PathManager } from '../utils/PathManager.js';
 import { Canvas, drawWeapon, shapeFromCategories } from '../utils/PngGenerator.js';
 
 export interface ModItemSpec {
@@ -28,6 +29,23 @@ export interface LootEntry {
   weight: number;
 }
 
+interface ModelPlan {
+  name: string;
+  mesh?: string | undefined;
+  texture?: string | undefined;
+  scale?: number | undefined;
+  worldOffset?: string | undefined;
+  worldRotate?: string | undefined;
+  vanillaSprite?: string | undefined;
+}
+
+interface ModelInfo {
+  name: string;
+  mesh: string;
+  scale?: number | undefined;
+  texture: string | null;
+}
+
 export interface GenerateModOptions {
   modId: string;
   modName: string;
@@ -37,6 +55,7 @@ export interface GenerateModOptions {
   gameVersion?: string;
   outputPath: string;
   overwrite?: boolean;
+  gamePath?: string;
   items: ModItemSpec[];
   models?: ModModelSpec[];
   recipes?: ModRecipeSpec[];
@@ -71,9 +90,11 @@ function renderWeaponArt(shape: 'axe' | 'blade', width: number, height: number, 
 
 export class ModProjectGenerator {
   private scriptGenerator: ScriptGenerator;
+  private pathManager: PathManager;
 
-  constructor(db: DatabaseManager) {
+  constructor(db: DatabaseManager, pathManager?: PathManager) {
     this.scriptGenerator = new ScriptGenerator(db);
+    this.pathManager = pathManager || new PathManager();
   }
 
   async generateMod(options: GenerateModOptions): Promise<GeneratedModResult> {
@@ -107,24 +128,101 @@ export class ModProjectGenerator {
       [...baseInfoLines, `modversion=${options.version || '1.0.0'}`, `versionMin=${gameVersion}`].join('\n') + '\n'
     );
 
+    // ---- models: plan = explicit specs + auto models cloned from vanilla WeaponSprite ----
+    // REGLA: SIEMPRE copiar el PNG vanilla como textura base (renombrada al modelo,
+    // dentro del mod) para que el usuario la pinte y sobreescriba sin tocar scripts
+    // y sin afectar a los items vanilla.
+    const resolvedTextures: Record<string, string | null> = {};
+    const gamePath = options.gamePath || (await this.pathManager.detectProjectZomboidPath());
+    const modelChunks: string[] = [];
+    const modelInfos: ModelInfo[] = [];
+    const spriteRenames: Array<{ itemName: string; from: string; to: string }> = [];
+
+    const plans: ModelPlan[] = [];
+    const plannedNames = new Set<string>();
+    const spriteToModel = new Map<string, string>();
+
+    for (const model of options.models || []) {
+      if (plannedNames.has(model.name)) continue;
+      plannedNames.add(model.name);
+      plans.push({ name: model.name, scale: model.scale, worldOffset: model.worldOffset, worldRotate: model.worldRotate, mesh: model.mesh, texture: model.texture });
+    }
+    for (const item of options.items) {
+      const sprite = typeof item.properties?.WeaponSprite === 'string' ? item.properties.WeaponSprite.trim() : '';
+      if (!sprite || plannedNames.has(sprite)) continue;
+      const existing = spriteToModel.get(sprite);
+      if (existing) {
+        spriteRenames.push({ itemName: item.name, from: sprite, to: existing });
+        continue;
+      }
+      const modelName = plannedNames.has(item.name) ? `${item.name}Model` : item.name;
+      plannedNames.add(modelName);
+      spriteToModel.set(sprite, modelName);
+      plans.push({ name: modelName, vanillaSprite: sprite });
+      spriteRenames.push({ itemName: item.name, from: sprite, to: modelName });
+    }
+
+    for (const plan of plans) {
+      const vanillaBody = gamePath
+        ? (plan.vanillaSprite
+            ? this.extractVanillaModelBlock(gamePath, { name: plan.vanillaSprite })
+            : this.extractVanillaModelBlock(gamePath, { mesh: plan.mesh }))
+        : null;
+
+      if (vanillaBody) {
+        const meshMatch = vanillaBody.match(/mesh\s*=\s*([^,\r\n]+),/);
+        const mesh = meshMatch ? meshMatch[1].trim() : '';
+        const texMatch = vanillaBody.match(/texture\s*=\s*([^,\r\n]+),/);
+        const vanillaTexRef = texMatch
+          ? texMatch[1].trim()
+          : (gamePath && mesh ? this.resolveVanillaTextureByBasename(gamePath, mesh) : null);
+        const newTexRef = vanillaTexRef && gamePath
+          ? this.copyVanillaTextureBase(gamePath, vanillaTexRef, plan.name, gameVersion, write)
+          : null;
+        resolvedTextures[plan.name] = newTexRef;
+        modelChunks.push(this.rebuildModelBlock(vanillaBody, plan.name, newTexRef, plan));
+        modelInfos.push({ name: plan.name, mesh, scale: plan.scale, texture: newTexRef });
+        continue;
+      }
+
+      if (!plan.mesh) continue; // sprite vanilla no encontrado y sin mesh propio
+      const spec = { name: plan.name, mesh: plan.mesh, texture: plan.texture, scale: plan.scale, worldOffset: plan.worldOffset, worldRotate: plan.worldRotate } as Record<string, any>;
+      let textureRef: string | null = spec.texture ? String(spec.texture) : null;
+      if (!textureRef && gamePath) {
+        textureRef = this.resolveVanillaTextureRef(gamePath, spec.mesh);
+      }
+      if (textureRef && gamePath) {
+        const copied = this.copyVanillaTextureBase(gamePath, textureRef, plan.name, gameVersion, write);
+        resolvedTextures[plan.name] = copied ?? textureRef;
+        spec.texture = copied ?? textureRef;
+      } else {
+        resolvedTextures[plan.name] = textureRef;
+        if (textureRef) spec.texture = textureRef;
+      }
+      modelChunks.push(await this.scriptGenerator.generateScriptUnwrapped('model', plan.name, spec));
+      modelInfos.push({ name: plan.name, mesh: plan.mesh, scale: plan.scale, texture: resolvedTextures[plan.name] });
+    }
+
+    if (modelChunks.length > 0) {
+      const content = this.wrapModule('Base', modelChunks.join('\n\n'));
+      write(join(gameVersion, 'media', 'scripts', 'models', `${options.modId}_models.txt`), content);
+    }
+
     // ---- item scripts (single module block, module = modId, imports Base) ----
+    // Los items que apuntaban a un sprite vanilla pasan al modelo clonado del mod.
     const itemChunks: string[] = [];
     for (const item of options.items) {
-      itemChunks.push(await this.scriptGenerator.generateScriptUnwrapped('item', item.name, item.properties || {}));
+      let chunk = await this.scriptGenerator.generateScriptUnwrapped('item', item.name, item.properties || {});
+      const rename = spriteRenames.find(r => r.itemName === item.name);
+      if (rename) {
+        const escaped = rename.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        chunk = chunk.replace(new RegExp(`WeaponSprite\\s*=\\s*${escaped}\\s*,`), `WeaponSprite = ${rename.to},`);
+      }
+      itemChunks.push(chunk);
     }
     if (itemChunks.length > 0) {
       const content = this.wrapModule(options.modId, itemChunks.join('\n\n'));
       write(join(gameVersion, 'media', 'scripts', 'items', `Item_${options.modId}.txt`), content);
-    }
-
-    // ---- model definitions (module Base) ----
-    if (options.models && options.models.length > 0) {
-      const modelChunks: string[] = [];
-      for (const model of options.models) {
-        modelChunks.push(await this.scriptGenerator.generateScriptUnwrapped('model', model.name, model as any));
-      }
-      const content = this.wrapModule('Base', modelChunks.join('\n\n'));
-      write(join(gameVersion, 'media', 'scripts', 'models', `${options.modId}_models.txt`), content);
     }
 
     // ---- craftRecipes (module Base) ----
@@ -187,7 +285,7 @@ export class ModProjectGenerator {
     }
 
     // ---- step-by-step guide ----
-    const guide = this.buildGuide(options, files, gameVersion, iconNames);
+    const guide = this.buildGuide(options, files, gameVersion, iconNames, resolvedTextures, modelInfos);
     write('GUIA.md', guide);
 
     return {
@@ -202,7 +300,9 @@ export class ModProjectGenerator {
     options: GenerateModOptions,
     files: string[],
     gameVersion: string,
-    iconNames: Set<string>
+    iconNames: Set<string>,
+    resolvedTextures: Record<string, string | null> = {},
+    modelInfos: ModelInfo[] = []
   ): string {
     const gvDir = join(gameVersion, 'media');
     const lines: string[] = [];
@@ -231,7 +331,8 @@ export class ModProjectGenerator {
       else if (file.includes('Translate')) lines.push(`| \`${file}\` | Nombre visible del item en el juego |`);
       else if (file.endsWith('icon.png')) lines.push(`| \`${file}\` | Icono del mod — **GENERADO automáticamente** (silueta del arma), reemplazable |`);
       else if (file.endsWith('poster.png')) lines.push(`| \`${file}\` | Póster de Workshop — **GENERADO automáticamente**, reemplazable |`);
-      else if (file.includes('textures')) lines.push(`| \`${file}\` | Icono de inventario — **GENERADO automáticamente** (128x128), reemplazable |`);
+      else if (file.includes('textures') && /Item_/.test(file)) lines.push(`| \`${file}\` | Icono de inventario — **GENERADO automáticamente** (128x128), reemplazable |`);
+      else if (file.includes('textures')) lines.push(`| \`${file}\` | Textura base del modelo 3D — **copia vanilla lista para pintar** (retexture) |`);
     }
     lines.push('');
 
@@ -289,13 +390,14 @@ export class ModProjectGenerator {
     // Step 3 — 3D model
     lines.push(`## Paso 3 — Modelo 3D (OPCIONAL — el mod ya funciona sin esto)`);
     lines.push('');
-    if (options.models && options.models.length > 0) {
+    if (modelInfos.length > 0) {
       lines.push(`Estado actual: los bloques \`model\` reutilizan meshes vanilla, así que **ya se ve en 3D sin trabajo extra**:`);
       lines.push('');
-      lines.push('| Modelo | Mesh vanilla usado |');
-      lines.push('|---|---|');
-      for (const model of options.models) {
-        lines.push(`| ${model.name} | \`${model.mesh}\` (scale ${model.scale ?? 1.0}) |`);
+      lines.push('| Modelo | Mesh vanilla usado | Textura base incluida |');
+      lines.push('|---|---|---|');
+      for (const model of modelInfos) {
+        const tex = resolvedTextures[model.name];
+        lines.push(`| ${model.name} | \`${model.mesh}\` (scale ${model.scale ?? 1.0}) | ${tex ? `\`${tex}.png\`` : '—'} |`);
       }
       lines.push('');
       lines.push(`Para usar un modelo PROPIO (todo DENTRO de la carpeta del mod):`);
@@ -304,7 +406,7 @@ export class ModProjectGenerator {
       lines.push(`3. Exporta la textura PNG a: \`${options.modId}\\${gvDir}\\textures\\weapons\\1handed\\<Nombre>.png\``);
       lines.push(`4. Edita el bloque en \`${options.modId}\\${files.find(f => f.includes('_models')) || join(gameVersion, 'media', 'scripts', 'models')}\`:`);
       lines.push('   ```');
-      for (const model of options.models) {
+      for (const model of modelInfos) {
         lines.push(`   model ${model.name}`);
         lines.push(`   {`);
         lines.push(`       mesh = weapons/1handed/<Nombre>,      ← cambia aquí`);
@@ -323,21 +425,38 @@ export class ModProjectGenerator {
     let nextStep = 4;
 
     // Step — retexture (identity without modeling)
-    if (options.models && options.models.length > 0) {
+    if (modelInfos.length > 0) {
+      const withTexture = modelInfos.filter(m => resolvedTextures[m.name]);
       lines.push(`## Paso ${nextStep} — Retexture: cambia el look SIN modelar (recomendado)`);
       nextStep++;
       lines.push('');
-      lines.push(`El mesh vanilla tiene sus UVs listas — puedes darle identidad propia solo cambiando la textura:`);
-      lines.push('');
-      lines.push(`1. Localiza la textura vanilla del mesh que usas (SOLO lectura):`);
-      lines.push(`   \`...\\ProjectZomboid\\media\\textures\\<ruta del mesh>.png\` — ej. \`weapons\\2handed\\FireAxe.png\``);
-      lines.push(`2. Edítala en GIMP/Photoshop: colores, metal, desgaste, runas — lo que defina tu arma`);
-      lines.push(`3. Guarda el resultado DENTRO del mod: \`${options.modId}\\${gvDir}\\textures\\<misma-ruta>\\<TuTextura>.png\``);
-      lines.push(`4. Cambia la línea \`texture\` del bloque model (en \`${options.modId}\\${files.find(f => f.includes('_models')) || 'models'}\`):`);
-      lines.push('   ```');
-      lines.push(`   texture = <ruta-del-mesh>,        ← original (se ve vanilla)`);
-      lines.push(`   texture = <ruta-del-mesh>/<TuTextura>,  ← tu versión`);
-      lines.push('   ```');
+      if (withTexture.length > 0) {
+        lines.push(`El mod YA INCLUYE la textura base editable (copia vanilla con las UVs correctas) y el bloque \`model\` ya apunta a ella:`);
+        lines.push('');
+        lines.push('| Modelo | Textura base DENTRO del mod — pinta este archivo |');
+        lines.push('|---|---|');
+        for (const model of withTexture) {
+          const tex = resolvedTextures[model.name]!;
+          lines.push(`| ${model.name} | \`${options.modId}\\${gameVersion}\\media\\textures\\${tex}.png\` |`);
+        }
+        lines.push('');
+        lines.push(`1. Abre ese PNG en GIMP/Photoshop: pinta SOLO colores, metal, desgaste — NO muevas regiones ni recortes (son UVs, no una ilustración)`);
+        lines.push(`2. Guarda el MISMO archivo, mismo nombre y ruta`);
+        lines.push(`3. Reinicia el juego — no hay que tocar ningún script, la línea \`texture\` del modelo ya apunta a la copia del mod`);
+        lines.push(`Si quieres VARIAS variantes de textura, guarda una copia con otro nombre (ej. \`MiTextura.png\`) y cambia la línea \`texture\` en \`${options.modId}\\${files.find(f => f.includes('_models')) || join(gameVersion, 'media', 'scripts', 'models')}\`.`);
+      } else {
+        lines.push(`El mesh vanilla tiene sus UVs listas — puedes darle identidad propia solo cambiando la textura:`);
+        lines.push('');
+        lines.push(`1. Localiza la textura vanilla del mesh que usas (SOLO lectura):`);
+        lines.push(`   \`...\\ProjectZomboid\\media\\textures\\<ruta del mesh>.png\` — ej. \`weapons\\2handed\\FireAxe.png\``);
+        lines.push(`2. Edítala en GIMP/Photoshop: colores, metal, desgaste, runas — lo que defina tu arma`);
+        lines.push(`3. Guarda el resultado DENTRO del mod: \`${options.modId}\\${gvDir}\\textures\\<misma-ruta>\\<TuTextura>.png\``);
+        lines.push(`4. Cambia la línea \`texture\` del bloque model (en \`${options.modId}\\${files.find(f => f.includes('_models')) || 'models'}\`):`);
+        lines.push('   ```');
+        lines.push(`   texture = <ruta-del-mesh>,        ← original (se ve vanilla)`);
+        lines.push(`   texture = <ruta-del-mesh>/<TuTextura>,  ← tu versión`);
+        lines.push('   ```');
+      }
       lines.push(`Nota: las texturas vanilla son chicas (32x64 típico) — respeta las proporciones de las UVs, no hace falta más resolución.`);
       lines.push('');
     }
@@ -496,7 +615,10 @@ export class ModProjectGenerator {
     lines.push(`- [ ] Item probado en juego (modo debug)`);
     lines.push(`- [ ] \`Item_*.png\` de cada item reemplazados por arte real`);
     lines.push(`- [ ] \`icon.png\` y \`poster.png\` reemplazados`);
-    if (options.models && options.models.length > 0) {
+    if (Object.values(resolvedTextures).some(Boolean)) {
+      lines.push(`- [ ] Textura del modelo pintada — abre el PNG base copiado de vanilla, pinta colores y SOBREESCRIBE el mismo archivo (no hay que tocar scripts)`);
+    }
+    if (modelInfos.length > 0) {
       lines.push(`- [ ] (Opcional) Modelo 3D propio en \`models_X\``);
     }
     lines.push(`- [ ] Nombres revisados en \`ItemName.json\``);
@@ -512,5 +634,232 @@ export class ModProjectGenerator {
     }
     lines.push(content, '}');
     return lines.join('\n');
+  }
+
+  private walkFiles(dir: string, ext: string, acc: string[] = []): string[] {
+    if (!existsSync(dir)) return acc;
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return acc;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        this.walkFiles(full, ext, acc);
+      } else if (entry.name.toLowerCase().endsWith(ext)) {
+        acc.push(full);
+      }
+    }
+    return acc;
+  }
+
+  private resolveVanillaTextureRef(gamePath: string, mesh: string): string | null {
+    const needle = `mesh = ${mesh},`;
+    for (const file of this.walkFiles(join(gamePath, 'media', 'scripts'), '.txt')) {
+      let raw: string;
+      try {
+        raw = readFileSync(file, 'utf8');
+      } catch {
+        continue;
+      }
+      const idx = raw.indexOf(needle);
+      if (idx === -1) continue;
+      const after = raw.slice(idx + needle.length);
+      const endMatch = after.search(/^\s*model\s+\w+\s*$/m);
+      const scope = endMatch === -1 ? after : after.slice(0, endMatch);
+      const texMatch = scope.match(/texture\s*=\s*([^,\r\n]+),/);
+      if (texMatch) {
+        return texMatch[1].trim();
+      }
+      return this.resolveVanillaTextureByBasename(gamePath, mesh);
+    }
+    return this.resolveVanillaTextureByBasename(gamePath, mesh);
+  }
+
+  private resolveVanillaTextureByBasename(gamePath: string, mesh: string): string | null {
+    const base = mesh.split('/').pop() || mesh;
+    const candidates = [base, base.replace(/_hand$/i, '')].filter(Boolean);
+    for (const file of this.walkFiles(join(gamePath, 'media', 'textures'), '.png')) {
+      const name = file.slice(file.lastIndexOf('\\') + 1, file.lastIndexOf('.'));
+      if (candidates.some(c => c.toLowerCase() === name.toLowerCase())) {
+        return file
+          .slice(join(gamePath, 'media', 'textures').length + 1)
+          .replace(/\\/g, '/')
+          .replace(/\.png$/i, '');
+      }
+    }
+    return null;
+  }
+
+  private findVanillaTextureFile(gamePath: string, ref: string): string | null {
+    const clean = ref.replace(/\.(png|dds)$/i, '');
+    for (const ext of ['.png', '.dds']) {
+      const p = join(gamePath, 'media', 'textures', clean + ext);
+      if (existsSync(p)) return p;
+    }
+    return null;
+  }
+
+  /**
+   * Localiza un bloque `model` vanilla y devuelve su cuerpo (mesh, texture,
+   * attachments...) sin las llaves externas. Se busca por nombre de bloque o por
+   * ruta de mesh.
+   */
+  private extractVanillaModelBlock(
+    gamePath: string,
+    locator: { name?: string | undefined; mesh?: string | undefined }
+  ): string | null {
+    if (!gamePath) return null;
+    const patterns: RegExp[] = [];
+    if (locator.name) {
+      patterns.push(new RegExp(`^[ \\t]{0,8}model[ \\t]+${locator.name}[ \\t]*$`, 'm'));
+    }
+    if (locator.mesh) {
+      const escapedMesh = locator.mesh.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      patterns.push(new RegExp(`^[ \\t]*mesh[ \\t]*=[ \\t]*${escapedMesh},[ \\t]*$`, 'm'));
+    }
+    for (const file of this.walkFiles(join(gamePath, 'media', 'scripts'), '.txt')) {
+      let raw: string;
+      try {
+        raw = readFileSync(file, 'utf8');
+      } catch {
+        continue;
+      }
+      for (let pi = 0; pi < patterns.length; pi++) {
+        const m = raw.match(patterns[pi]);
+        if (!m || m.index === undefined) continue;
+        // Match por mesh: retroceder hasta el header `model <Nombre>` más cercano
+        let blockIndex = m.index;
+        if (pi === (locator.name ? 1 : 0)) {
+          const headerRe = /^[ \t]{0,8}model[ \t]+[\w]+[ \t]*$/gm;
+          const before = raw.slice(0, m.index);
+          let lastHeader = -1;
+          let hm: RegExpExecArray | null;
+          while ((hm = headerRe.exec(before)) !== null) lastHeader = hm.index;
+          if (lastHeader === -1) continue;
+          blockIndex = lastHeader;
+        }
+        const body = this.readModelBlockBody(raw, blockIndex);
+        if (body !== null) return body;
+      }
+    }
+    return null;
+  }
+
+  private readModelBlockBody(raw: string, modelLineIndex: number): string | null {
+    const lines = raw.slice(modelLineIndex).split(/\r?\n/);
+    let started = false;
+    let depth = 0;
+    const body: string[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (!started) {
+        if (line.includes('{')) {
+          started = true;
+          depth = 1;
+          if (line.trim() !== '{') {
+            const inner = line.slice(line.indexOf('{') + 1);
+            depth += (inner.match(/{/g) || []).length;
+            depth -= (inner.match(/}/g) || []).length;
+            if (depth > 0) body.push(inner);
+          }
+        }
+        continue;
+      }
+      depth += (line.match(/{/g) || []).length;
+      depth -= (line.match(/}/g) || []).length;
+      if (depth <= 0) break;
+      body.push(line);
+    }
+    return started ? body.join('\n') : null;
+  }
+
+  /**
+   * Copia SIEMPRE el PNG/DDS vanilla como base pintable dentro del mod,
+   * renombrado al nombre del modelo (evita sobreescribir la textura vanilla
+   * global al pintarla). Devuelve la nueva referencia de textura.
+   */
+  private copyVanillaTextureBase(
+    gamePath: string,
+    textureRef: string,
+    newBaseName: string,
+    gameVersion: string,
+    write: (relPath: string, content: string | Buffer) => void
+  ): string | null {
+    const vanillaFile = this.findVanillaTextureFile(gamePath, textureRef);
+    if (!vanillaFile) return null;
+    const ext = vanillaFile.slice(vanillaFile.lastIndexOf('.'));
+    const slash = textureRef.lastIndexOf('/');
+    const dir = slash >= 0 ? textureRef.slice(0, slash + 1) : '';
+    const newRef = dir + newBaseName;
+    // Si el archivo ya existe (probablemente pintado por el usuario), NO sobreescribir
+    if (existsSync(join(gameVersion, 'media', 'textures', newRef + ext))) return newRef;
+    write(join(gameVersion, 'media', 'textures', newRef + ext), readFileSync(vanillaFile));
+    return newRef;
+  }
+
+  /**
+   * Reconstruye el bloque vanilla con nuevo nombre de modelo y textura del mod,
+   * preservando los attachments (world + Bip01_Prop2) tal cual vanilla para que
+   * el arma se sostenga y se tirada igual que el original.
+   */
+  private rebuildModelBlock(
+    vanillaBody: string,
+    newModelName: string,
+    newTextureRef: string | null,
+    overrides?: { scale?: number | undefined; worldOffset?: string | undefined; worldRotate?: string | undefined }
+  ): string {
+    const indent = '        ';
+    const out: string[] = [`    model ${newModelName}`, '    {'];
+    let textureWritten = false;
+    let scaleWritten = false;
+    let inWorld = false;
+    for (const line of vanillaBody.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('attachment')) {
+        inWorld = /world/.test(trimmed);
+        out.push(line);
+        continue;
+      }
+      if (trimmed.startsWith('offset') && inWorld && overrides?.worldOffset) {
+        out.push(`            offset = ${overrides.worldOffset},`);
+        continue;
+      }
+      if (trimmed.startsWith('rotate') && inWorld && overrides?.worldRotate) {
+        out.push(`            rotate = ${overrides.worldRotate},`);
+        continue;
+      }
+      if (trimmed.startsWith('mesh')) {
+        out.push(`${indent}${trimmed}`);
+        if (newTextureRef && !textureWritten) {
+          out.push(`${indent}texture = ${newTextureRef},`);
+          textureWritten = true;
+        }
+        if (overrides?.scale !== undefined && !scaleWritten) {
+          out.push(`${indent}scale = ${overrides.scale},`);
+          scaleWritten = true;
+        }
+        continue;
+      }
+      if (trimmed.startsWith('texture')) {
+        if (newTextureRef) {
+          out.push(`${indent}texture = ${newTextureRef},`);
+          textureWritten = true;
+        }
+        continue;
+      }
+      if (trimmed.startsWith('scale')) {
+        if (overrides?.scale !== undefined && !scaleWritten) {
+          out.push(`${indent}scale = ${overrides.scale},`);
+          scaleWritten = true;
+        }
+        continue;
+      }
+      out.push(line);
+    }
+    out.push('    }');
+    return out.join('\n');
   }
 }

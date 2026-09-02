@@ -54,6 +54,18 @@ description: Guía completa para crear mods de Project Zomboid Build 42 con el M
   ```
   Listas útiles: `MeleeWeapons(_Mid/_Late)`, `GunStoreKnives`, `ArmyBunkerLockers`, `SurvivalGear`, `PawnShopKnives`, `PoliceLockers`, `GunStoreDisplayCase`. Peso: 1 = común relativo, 0.01 = rarísimo.
 
+## Diagnóstico: "CraftRecipe error" / juego colgado en "iniciar partida"
+
+UN solo script que falla aborta TODO el arranque (`ScriptBucket.LoadScripts> Exception thrown` en `console.txt`).
+
+1. **Leer `C:\Users\<user>\Zomboid\console.txt`** (últimas ~200 líneas): `[craftRecipe] removing script due to load error = <Nombre>` nombra el script culpable exacto.
+2. **Técnica de probes (bisección)**: crear mini-mods de UNA sola construcción cada uno (una prop o un input aislado, nombres únicos tipo `ProbeX_Recipe`, mods con item `TestItem` mínimo), activarlos TODOS a la vez y arrancar el juego UNA vez → `console.txt` lista cuáles recetas fallan y cuáles no. Identifica el culpable exacto en 1-2 arranques en vez de adivinar.
+3. **Sintaxis craftRecipe B42 verificada in-game (42.20.4)**:
+   - Inputs: ids SIEMPRE entre corchetes `item 4 [Base.X] mode:destroy,`; drainables SIN mode (`item 1 [Base.BlowTorch],` consume usos); herramientas `item 1 tags[base:x] mode:keep,` (sin corchetes).
+   - Outputs: ids pelados SIN corchetes (`item 1 ModId.Item,`) — cross-module OK.
+   - **`CanBeDoneFromFloor` es un TAG de bancada, NO una propiedad** — como propiedad suelta aborta `CraftRecipe.Load` (CraftRecipe.java:524). El tag de bancada es OBLIGATORIO para que la receta aparezca: `Tags = AnySurfaceCraft` (o `InHandCraft`, `Forge`...).
+   - `SkillRequired = MetalWelding:6`, `xpAward = MetalWelding:75`, `timedAction = Welding` — formato `Skill:Nivel`, OK.
+
 ## Herramientas MCP (repo: `C:\Users\Jlian\Documents\Codigo\pz-mcp-server`)
 
 - `generate_mod` — paquete completo listo para copiar (incluye GUIA.md + comandos de prueba).

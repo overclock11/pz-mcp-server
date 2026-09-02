@@ -67,7 +67,7 @@ export class ValidationEngine {
     MinAngle: { type: 'number', min: -360, max: 360 },
     PushBackMod: { type: 'number', min: 0, max: 10 },
     KnockdownMod: { type: 'number', min: 0, max: 10 },
-    MetalValue: { type: 'number', min: 0, max: 100 },
+    MetalValue: { type: 'number', min: 0, max: 200 }, // vanilla Axe usa 120
 
     // Boolean properties
     CanBeEquipped: { type: 'boolean' },
@@ -105,7 +105,18 @@ export class ValidationEngine {
     MinimumSwingTime: { type: 'number', min: 0.1, max: 10 },
     SwingAmountBeforeImpact: { type: 'number', min: 0, max: 1 },
     SplatNumber: { type: 'number', min: 0, max: 20 },
+    SplatSize: { type: 'number', min: 0, max: 50 },
     SplatBloodOnNoDeath: { type: 'boolean' },
+    ScaleWorldIcon: { type: 'number', min: 0.01, max: 100 },
+
+    // Identidad visual / animación (presentes en items vanilla)
+    Icon: { type: 'string' },
+    WeaponSprite: { type: 'string' },
+    IdleAnim: { type: 'string' },
+
+    // craftRecipe B42 (vanilla: time, category en minúsculas)
+    time: { type: 'number', min: 1, max: 100000 },
+    category: { type: 'string' },
 
     // Sound references
     SwingSound: { type: 'reference', referenceType: 'sound' },
@@ -357,12 +368,12 @@ export class ValidationEngine {
       return value.slice(1, -1);
     }
 
-    // Parse numbers
-    if (/^\d+$/.test(value)) {
+    // Parse numbers (incluye negativos y notación científica)
+    if (/^[+-]?\d+$/.test(value)) {
       return parseInt(value, 10);
     }
     
-    if (/^\d*\.\d+$/.test(value)) {
+    if (/^[+-]?(\d*\.\d+|\d+)([eE][+-]?\d+)?$/.test(value)) {
       return parseFloat(value);
     }
 

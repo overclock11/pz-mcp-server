@@ -47,7 +47,7 @@ export class ScriptGenerator {
         SubCategory: 'Swinging',
         SwingAnim: 'Bat',
         Swingtime: 3.0,
-        MinimumSwingTime: 3.0,
+        MinimumSwingtime: 3.0,
         SwingAmountBeforeImpact: 0.02,
         KnockBackOnNoDeath: true,
         KnockdownMod: 0.0,
@@ -139,8 +139,6 @@ export class ScriptGenerator {
         DisplayCategory: 'Tool',
         ItemType: 'base:normal',
         Weight: 0.5,
-        ConditionMax: 10,
-        ConditionLowerChanceOneIn: 30,
       },
       requiredProperties: ['DisplayName', 'Icon', 'Type'],
       optionalProperties: ['AttachmentType', 'Tags', 'MetalValue'],
@@ -189,13 +187,16 @@ export class ScriptGenerator {
     });
 
     // Recipe template (Build 42 craftRecipe format)
+    // OJO: `CanBeDoneFromFloor` es un TAG de bancada, NO una propiedad — como
+    // propiedad suelta CraftRecipe.Load aborta y el juego no arranca.
+    // El tag de bancada es OBLIGATORIO para que la receta aparezca (pzwiki).
     this.templates.set('basic_recipe', {
       type: 'recipe',
       category: 'Recipe',
       baseStats: {
         time: 100.0,
         category: 'Survival',
-        CanBeDoneFromFloor: true,
+        Tags: 'AnySurfaceCraft',
       },
       requiredProperties: ['Result'],
       optionalProperties: ['timedAction', 'Tags', 'OnCreate', 'OnGiveXP'],
@@ -490,10 +491,21 @@ export class ScriptGenerator {
     // Merge template properties with user specifications
     const properties = { ...template.baseStats };
     Object.keys(specs).forEach(key => {
-      if (!['ingredients', 'result', 'resultCount', 'keep'].includes(key)) {
+      if (!['ingredients', 'result', 'resultCount', 'keep', 'name'].includes(key)) {
         properties[key] = specs[key];
       }
     });
+
+    // CanBeDoneFromFloor como propiedad rompe CraftRecipe.Load — migrar a Tags
+    if (properties.CanBeDoneFromFloor !== undefined) {
+      const wantsFloor = properties.CanBeDoneFromFloor === true || properties.CanBeDoneFromFloor === 'true';
+      delete properties.CanBeDoneFromFloor;
+      if (wantsFloor) {
+        const tags = String(properties.Tags || '').split(';').filter(Boolean);
+        if (!tags.includes('CanBeDoneFromFloor')) tags.push('CanBeDoneFromFloor');
+        properties.Tags = tags.join(';');
+      }
+    }
 
     // Apply balance adjustments
     if (options.balance && options.balance !== 'custom') {
@@ -507,19 +519,27 @@ export class ScriptGenerator {
       lines.push(`        ${key} = ${formattedValue},`);
     }
 
-    // Inputs block (Build 42 syntax)
+    // Inputs block (Build 42 syntax — los ids van SIEMPRE entre corchetes; tags[...] sin corchetes)
     lines.push(`        inputs`);
     lines.push(`        {`);
     const ingredients = Array.isArray(specs.ingredients) ? specs.ingredients : [];
     for (const ingredient of ingredients) {
       if (typeof ingredient === 'string') {
-        const suffix = ingredient.includes('mode:') ? '' : ' mode:destroy';
-        lines.push(`            item 1 ${ingredient}${suffix},`);
+        const hasMode = ingredient.includes('mode:');
+        const ref = hasMode ? ingredient : this.formatIngredientRef(ingredient);
+        const suffix = hasMode ? '' : ' mode:destroy';
+        lines.push(`            item 1 ${ref}${suffix},`);
       } else if (ingredient.item) {
         const count = ingredient.count || 1;
-        const hasMode = String(ingredient.item).includes('mode:');
-        const suffix = hasMode ? '' : (ingredient.keep ? ' mode:keep' : ' mode:destroy');
-        lines.push(`            item ${count} ${ingredient.item}${suffix},`);
+        const raw = String(ingredient.item);
+        const hasMode = raw.includes('mode:');
+        let suffix: string;
+        if (hasMode) suffix = '';
+        else if (ingredient.mode === 'none') suffix = '';
+        else if (ingredient.mode) suffix = ` mode:${ingredient.mode}`;
+        else if (ingredient.keep) suffix = ' mode:keep';
+        else suffix = ' mode:destroy';
+        lines.push(`            item ${count} ${this.formatIngredientRef(raw)}${suffix},`);
       }
     }
     lines.push(`        }`);
@@ -705,6 +725,17 @@ export class ScriptGenerator {
         properties[prop] = Math.round(avgValue * multiplier * 10) / 10;
       }
     }
+  }
+
+  /**
+   * B42 craftRecipe inputs: los ids de item van SIEMPRE entre corchetes
+   * (`[Base.MetalBar]`); los selectores de tags van sin ellos (`tags[base:x]`).
+   * Los outputs NO llevan corchetes.
+   */
+  private formatIngredientRef(raw: string): string {
+    const trimmed = raw.trim();
+    if (trimmed.startsWith('[') || trimmed.startsWith('tags[')) return trimmed;
+    return `[${trimmed}]`;
   }
 
   private formatPropertyValue(value: any): string {
